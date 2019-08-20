@@ -1,0 +1,1 @@
+./Debug/main.cpp.o ./Debug/server.cpp.o ./Debug/json_parser.cpp.o ./Debug/json_parser_exception.cpp.o ./Debug/data_store_connection.cpp.o ./Debug/sync_handler.cpp.o ./Debug/Config.cpp.o ./Debug/register_server_exception.cpp.o

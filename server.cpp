@@ -183,7 +183,7 @@ void server::handleServerBusy(int client)
 		ERR_print_errors_fp(stderr);
 	} else {
 //		const char *response = STATUS_503;
-		SSL_write(ssl, STATUS_500_SERVER_ERROR, strlen(STATUS_500_SERVER_ERROR));
+		SSL_write(ssl, STATUS_503, strlen(STATUS_503));
 		SSL_free(ssl);         /* release SSL state */
 		close(client);
 	}
@@ -229,7 +229,7 @@ void service_thread(std::queue<int> &q, std::mutex &q_mutex, std::condition_vari
 				break;
 			} else {
 				client = q.front();
-				printf(" value: %d\n", client);
+//				printf(" value: %d\n", client);
 				q.pop();
 			}
 		}
@@ -260,7 +260,7 @@ void service_thread(std::queue<int> &q, std::mutex &q_mutex, std::condition_vari
 							reply = STATUS_200 +
 								handler.handle_request(operation, request, requestType);
 							
-							printf("1\n");
+//							printf("1\n");
 						} else if (requestType == request_type::GET) {
 							reply = STATUS_200 + 
 								handler.handle_request(operation, request, requestType);
@@ -340,32 +340,29 @@ bool parse_header(std::string &header, std::string &operation, std::string &cont
 		return false;
 		
 	std::string method = resource.substr(0, loc);
-//	printf("-%s-\n", method.c_str());
 				
 	//get operation
 	std::string::size_type loc2 = resource.find(" ", loc+1);
-//	printf(".5\n");
+
 	if (loc2 == std::string::npos) 
 		return false;
-//	printf("1\n");
+
 	operation = resource.substr(loc+1, loc2-(loc+1));
-//	printf("2\n");						
+
 	if (!verify_request(method, operation))
 		return false;
-//	printf("3\n");	
+
 	if (method == HTTP_GET) {
 		requestType = request_type::GET;
-//		contentLength = "-1";
 	} else if (method == HTTP_POST) {	
 		requestType = request_type::POST;
 		loc = header.find(HTTP_CONTENT_LENGTH);
 				 
 		if (loc == std::string::npos)
 			return false;
-//	printf("4\n");
+
 		loc2 = header.find("\n", loc);
 		contentLength = header.substr(loc+16, loc2-loc+16);
-//		printf("length: %s\n", contentLength.c_str());
 	}
 	
 	return true;

@@ -329,8 +329,6 @@ long long sync_handler::relock_user(std::string& forUser, long long userLock)
 	long long toReturn{0};
 	std::unique_lock<std::mutex> lock(user_infos_lock);
 	
-printf("forUser lock: %lld, user_infos lock: %lld\n", userLock, user_infos[forUser].lock_time);
-	
 	if (user_infos.count(forUser) < 1) {
 		lock.unlock();
 		user_infos_cv.notify_one();
@@ -355,16 +353,10 @@ printf("forUser lock: %lld, user_infos lock: %lld\n", userLock, user_infos[forUs
 
 void sync_handler::unlock_user(std::string& forUser)
 {
-	printf("b4 unlock\n");
-	debug_user_infos();
-	
 	user_infos_lock.lock();
 	user_infos[forUser].lock_time = 0;
 	user_infos_lock.unlock();
 	user_infos_cv.notify_one();
-	
-	printf("after unlock\n");
-	debug_user_infos();
 }
 
 

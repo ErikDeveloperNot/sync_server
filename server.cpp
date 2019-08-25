@@ -30,6 +30,10 @@
  * simple, close each connection after write
  * a single lock for entire user map
  * 
+ * v1.5:
+ * only request where connection reuse should be needed is between sync-initial/final
+ * so modify thread that handles initial to keep connection open and block on read with short timeout timeout
+ * 
  * v2:
  * will keep connection open from server side and each thread will be in charge
  * of its own fd sets and run its own select, or some other type of solution like libevent.
@@ -46,8 +50,7 @@ server::server(Config *config)
 {
 	int listen_sd = startListener(config);
 	this->config = config;
-//	std::set<User_info, compare> *infos = new std::set<User_info, compare>{};
-	std::map<std::string, User_info> infos;// = new std::map<std::string, User_info>{};
+	std::map<std::string, User_info> infos;
 	
 	for (int i{1}; i<=config->getServiceThreads(); i++) {
 		std::thread t{service_thread, std::ref(service_q), std::ref(service_mutex), 
@@ -114,6 +117,9 @@ int server::startListener(Config *config)
 	
 	/* create new context from method */
 	ctx = SSL_CTX_new(method);   
+	
+//set session timeout for persistent connections
+//SSL_CTX_set_timeout(ctx, 5L);		//only needed for sync, if client takes more then 5 seconds slow client/net
     
 	if ( ctx == NULL )
     {
@@ -183,7 +189,7 @@ void server::handleServerBusy(int client)
 		ERR_print_errors_fp(stderr);
 	} else {
 //		const char *response = STATUS_503;
-		SSL_write(ssl, STATUS_500_SERVER_ERROR, strlen(STATUS_500_SERVER_ERROR));
+		SSL_write(ssl, STATUS_503, strlen(STATUS_503));
 		SSL_free(ssl);         /* release SSL state */
 		close(client);
 	}
@@ -206,9 +212,12 @@ void service_thread(std::queue<int> &q, std::mutex &q_mutex, std::condition_vari
 	
 	sync_handler handler{t, config, infos};
 	
-//	std::cout << t_id << std::endl;
-	
 	SSL *ssl;
+	
+fd_set connectionfds;
+struct timeval timeout;
+timeout.tv_usec = 0;
+timeout.tv_sec = 5;
 	
 	while (true) {
 //		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
@@ -229,7 +238,7 @@ void service_thread(std::queue<int> &q, std::mutex &q_mutex, std::condition_vari
 				break;
 			} else {
 				client = q.front();
-				printf(" value: %d\n", client);
+//				printf(" value: %d\n", client);
 				q.pop();
 			}
 		}
@@ -240,13 +249,24 @@ void service_thread(std::queue<int> &q, std::mutex &q_mutex, std::condition_vari
 		if ( SSL_accept(ssl) <= 0 )  {   /* do SSL-protocol accept/handshake */
 			ERR_print_errors_fp(stderr);
 		} else {
-			std::string request{};
-			std::string header{};
-			std::string operation{};
-			std::string contentLength{};
-			request_type requestType;
-			char buf[1024] = {0};
-			int bytes, total{0};
+//			std::string request{};
+//			std::string header{};
+//			std::string operation{};
+//			std::string contentLength{};
+//			request_type requestType;
+//			char buf[1024] = {0};
+//			int bytes, total{0};
+			
+bool keep_open{false};
+			do {
+keep_open = false;
+std::string request{};
+std::string header{};
+std::string operation{};
+std::string contentLength{};
+request_type requestType;
+char buf[1024] = {0};
+int bytes, total{0};
 			
 			if (read_incoming_bytes(ssl, header, 0)) {
 				bool valid{true};
@@ -257,10 +277,19 @@ void service_thread(std::queue<int> &q, std::mutex &q_mutex, std::condition_vari
 				try {
 					if (parse_header(header, operation, contentLength, requestType)) {
 						if (requestType ==  request_type::POST && read_incoming_bytes(ssl, request, std::stoi(contentLength))) {
-							reply = STATUS_200 +
-								handler.handle_request(operation, request, requestType);
+//							reply = STATUS_200 +
+//reply = ((operation == SYNC_INITIAL) ? STATUS_200_INITIAL_SYNC : STATUS_200) +
+//								handler.handle_request(operation, request, requestType);
+
+if (operation == SYNC_INITIAL) {
+	std::string replyMsg = handler.handle_request(operation, request, requestType);
+	reply = STATUS_200_INITIAL_SYNC + std::to_string(replyMsg.length()) + "\r\n\r\n" + replyMsg;
+} else {
+	reply = STATUS_200 + handler.handle_request(operation, request, requestType);
+}
+
 							
-							printf("1\n");
+//							printf("1\n");
 						} else if (requestType == request_type::GET) {
 							reply = STATUS_200 + 
 								handler.handle_request(operation, request, requestType);
@@ -270,17 +299,33 @@ void service_thread(std::queue<int> &q, std::mutex &q_mutex, std::condition_vari
 						
 						int written = SSL_write(ssl, reply.c_str(), reply.length());
 						printf("Bytes written: %d\n", written);
+if (operation == SYNC_INITIAL) {
+	keep_open = true;
+	FD_ZERO(&connectionfds);
+    FD_SET(client, &connectionfds);
+	int ret;
+	printf("start timer\n");
+	if ((ret = select(client + 1, NULL, &connectionfds, NULL, &timeout)) == 0) {
+		keep_open = false;
+	}
+	printf("end timer\n");
+}
 					}
 				} catch (register_server_exception &ex) {
 					printf("\n%s: Error:\nHeader\n%s\nRequest\n%s\nError: %s\n", t_id, 
 							header.c_str(), request.c_str(), ex.what());
 					SSL_write(ssl, ex.what(), strlen(ex.what()));
+keep_open = false;					
 				}
 			}
+			
+			} while (keep_open);
 		}
-		
+printf("closing client\n");		
+		SSL_clear(ssl);
 		SSL_free(ssl);         /* release SSL state */
 		close(client);
+printf("should be closed\n");
 		connections--;
 	}
 }
@@ -340,32 +385,29 @@ bool parse_header(std::string &header, std::string &operation, std::string &cont
 		return false;
 		
 	std::string method = resource.substr(0, loc);
-//	printf("-%s-\n", method.c_str());
 				
 	//get operation
 	std::string::size_type loc2 = resource.find(" ", loc+1);
-//	printf(".5\n");
+
 	if (loc2 == std::string::npos) 
 		return false;
-//	printf("1\n");
+
 	operation = resource.substr(loc+1, loc2-(loc+1));
-//	printf("2\n");						
+
 	if (!verify_request(method, operation))
 		return false;
-//	printf("3\n");	
+
 	if (method == HTTP_GET) {
 		requestType = request_type::GET;
-//		contentLength = "-1";
 	} else if (method == HTTP_POST) {	
 		requestType = request_type::POST;
 		loc = header.find(HTTP_CONTENT_LENGTH);
 				 
 		if (loc == std::string::npos)
 			return false;
-//	printf("4\n");
+
 		loc2 = header.find("\n", loc);
 		contentLength = header.substr(loc+16, loc2-loc+16);
-//		printf("length: %s\n", contentLength.c_str());
 	}
 	
 	return true;

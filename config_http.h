@@ -5,6 +5,8 @@
 
 
 std::string STATUS_200 = "HTTP/1.1 200 OK\nConnection: close\n\n";
+std::string STATUS_200_INITIAL_SYNC = "HTTP/1.1 200 \r\nConnection: keep-alive\r\nContent-Length: ";
+
 char * STATUS_400 = "HTTP/1.1 400 OK\nConnection: close\n\nBad Request\n\nBad Request";
 char * STATUS_401 = "HTTP/1.1 401 OK\nConnection: close\n\nUnauthorized";
 char * STATUS_500_SERVER_ERROR = "HTTP/1.1 500 OK\nConnection: close\n\nInternal Server Error\n\nServer Error";

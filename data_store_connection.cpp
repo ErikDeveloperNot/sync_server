@@ -9,91 +9,6 @@ float account_format = 1.00;
 
 data_store_connection::data_store_connection() : connected{false}
 {
-//	const char *conninfo = "hostaddr=192.168.56.102 \
-//							dbname=passvault \
-//							user=passvault-user \
-//							password=passvault-secret";
-//    PGconn     *conn;
-//    PGresult   *res;
-//    int         nFields;
-//    int         i,
-//                j;
-
-    // Make a connection to the database
-//    conn = PQconnectdb(conninfo);
-//	
-//	// Check to see that the backend connection was successfully made
-//    if (PQstatus(conn) != CONNECTION_OK)
-//    {
-//        fprintf(stderr, "Connection to database failed: %s", PQerrorMessage(conn));
-//        PQfinish(conn);
-//    }
-//	
-//	res = PQexec(conn, "select * from users");
-//	if (PQresultStatus(res) != PGRES_TUPLES_OK)
-//    {
-//        fprintf(stderr, "FETCH ALL failed: %s", PQerrorMessage(conn));
-//        return;
-//    }
-//
-//    // first, print out the table collumn attribute names
-//    nFields = PQnfields(res);
-//    for (i = 0; i < nFields; i++)
-//        printf("%-15s", PQfname(res, i));
-//    printf("\n\n");
-//
-//    // next, print out the rows of data
-//    for (i = 0; i < PQntuples(res); i++)
-//    {
-//        for (j = 0; j < nFields; j++)
-//            printf("%-15s", PQgetvalue(res, i, j));
-//        printf("\n");
-//    }
-//
-//	PQclear(res);
-//	
-//	
-//	const char *prePareName = "get_users_pst";
-//	res = PQprepare(conn, prePareName,
-//						"SELECT * FROM users WHERE account_uuid = $1::text AND account_last_sync = $2::bigint",
-//						2, NULL);
-//						
-//	if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-//		fprintf(stderr, "PQprepare failed: %s", PQerrorMessage(conn));
-//        return;
-//	}
-//	
-//	PQclear(res);
-//	
-//	const char *values[2];
-//	values[0] = "Admin";
-//	values[1] = "0";
-//	
-//	res = PQexecPrepared(conn, prePareName, 2, values, NULL, NULL, 0);
-	
-//	res = PQexecParams(conn,
-//						"SELECT * FROM users WHERE account_uuid = $1::text AND account_last_sync = $2::bigint",
-//						2,
-//						NULL,
-//						values,
-//						NULL,
-//						NULL,
-//						0);
-						
-//	if (PQresultStatus(res) != PGRES_TUPLES_OK)
-//    {
-//        fprintf(stderr, "PQExecParams failed: %s", PQerrorMessage(conn));
-//        return;
-//    }					
-//	
-//	for (i = 0; i < PQntuples(res); i++)
-//    {
-//        for (j = 0; j < nFields; j++)
-//            printf("%-15s", PQgetvalue(res, i, j));
-//        printf("\n");
-//    }
-//
-//	PQclear(res);
 }
 
 data_store_connection::~data_store_connection()
@@ -277,7 +192,8 @@ bool data_store_connection::createUser(User& user)
 	values[0] = user.account_uuid.c_str();
 	values[1] = user.account_password.c_str();
 	values[2] = std::to_string(user.account_last_sync).c_str();
-	values[3] = std::to_string(account_format).c_str();
+//	values[3] = std::to_string(account_format).c_str();
+	values[3] = "1.00";
 	
 	res = PQexecPrepared(conn, create_user_pre, 4, values, NULL, NULL, 0);
 	

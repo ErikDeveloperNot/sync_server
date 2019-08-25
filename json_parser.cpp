@@ -16,7 +16,7 @@ register_config_request json_parser::parse_delete_account(std::string& json)
 
 register_config_request json_parser::parse_user(std::string& json, bool register_config)
 {
-	printf("json object:\n%s\n", json.c_str());
+//	printf("json object:\n%s\n", json.c_str());
 	
 //	int index = eat_white_sapce(json, 0);
 //	
@@ -51,7 +51,7 @@ register_config_request json_parser::parse_user(std::string& json, bool register
 			index = get_value(json, index, registerConfigReq.version);
 			version = true;
 		} else {
-			printf("Invalid json, key: %s\n", key.c_str());
+			printf("Invalid json, key: %s\njson object\n%s\n", key.c_str(), json.c_str());
 			throw json_parser_exception{"Invalid json Exception"};
 		}
 	
@@ -83,14 +83,14 @@ sync_initial_request json_parser::parse_sync_initial(std::string& json)
 		
 		if (key == "accounts") {
 			if (json[index] != ':') {
-				printf("invalid json, expected  ':' at index %d, char: %c\n", index, json[index]);
+				printf("invalid json, expected  ':' at index %d, char: %c\n%s\n", index, json[index], json.c_str());
 				throw json_parser_exception{"Invalid json Exception"};
 			}
 			
 			index = eat_white_sapce(json, ++index);
 			
 			if (json[index] != '[') {
-				printf("invalid json, expected  '[' at index %d, char: %c\n", index, json[index]);
+				printf("invalid json, expected  '[' at index %d, char: %c\n%s\n", index, json[index], json.c_str());
 				throw json_parser_exception{"Invalid json Exception"};
 			}
 			
@@ -114,7 +114,7 @@ sync_initial_request json_parser::parse_sync_initial(std::string& json)
 							index = get_long_long_value(json, index, updateTime);
 							time = true;
 						} else {
-							printf("invalid json, invalid key at index %d, char: %c\n", index, json[index]);
+							printf("invalid json, invalid key at index %d, char: %c\n%s\n", index, json[index], json.c_str());
 							throw json_parser_exception{"Invalid json Exception"};
 						}
 					} while (!name || !time);
@@ -133,7 +133,7 @@ sync_initial_request json_parser::parse_sync_initial(std::string& json)
 							
 						break;
 					} else {
-						printf("invalid json, expected ',' of ']' at index %d, char: %c\n", index, json[index]);
+						printf("invalid json, expected ',' of ']' at index %d, char: %c\n%s\n", index, json[index], json.c_str());
 						throw json_parser_exception{"Invalid json Exception"};
 					}
 				}
@@ -185,14 +185,14 @@ sync_final_request json_parser::parse_sync_final(std::string& json)
 		} else if (key == "accounts") {
 			
 			if (json[index] != ':') {
-				printf("invalid json, expected  ':' at index %d, char: %c\n", index, json[index]);
+				printf("invalid json, expected  ':' at index %d, char: %c\n%s\n", index, json[index], json.c_str());
 				throw json_parser_exception{"Invalid json Exception"};
 			}
 			
 			index = eat_white_sapce(json, ++index);
 			
 			if (json[index] != '[') {
-				printf("invalid json, expected  '[' at index %d, char: %c\n", index, json[index]);
+				printf("invalid json, expected  '[' at index %d, char: %c\n%s\n", index, json[index], json.c_str());
 				throw json_parser_exception{"Invalid json Exception"};
 			}
 			
@@ -232,7 +232,7 @@ sync_final_request json_parser::parse_sync_final(std::string& json)
 							index = get_bool_value(json, index, account.deleted);
 							deleted = true;
 						} else {
-							printf("invalid json, invalid key at index %d, char: %c\n", index, json[index]);
+							printf("invalid json, invalid key at index %d, char: %c\n%s\n", index, json[index], json.c_str());
 							throw json_parser_exception{"Invalid json Exception"};
 						}
 					} while (!name || !time || !deleted || !user || !url || !pass || !oldPass);
@@ -251,7 +251,7 @@ sync_final_request json_parser::parse_sync_final(std::string& json)
 							
 						break;
 					} else {
-						printf("invalid json, expected ',' of ']' at index %d, char: %c\n", index, json[index]);
+						printf("invalid json, expected ',' of ']' at index %d, char: %c\n%s\n", index, json[index], json.c_str());
 						throw json_parser_exception{"Invalid json Exception"};
 					}
 				}
@@ -286,7 +286,7 @@ int json_parser::eat_white_sapce(std::string& json, int index)
 int json_parser::get_key(std::string& json, int index, std::string& key)
 {
 	if (json[index] != '"') {
-		printf("invalid json, in get_key at index %d, char: %c\n", index, json[index]);
+		printf("invalid json, in get_key at index %d, char: %c\n%s\n", index, json[index], json.c_str());
 		throw json_parser_exception{"Invalid json Exception"};
 	}
 	
@@ -304,7 +304,7 @@ int json_parser::get_key(std::string& json, int index, std::string& key)
 int json_parser::get_value(std::string& json, int index, std::string& value)
 {
 	if (json[index] != ':') {
-		printf("invalid json, in get_value at index %d, char: %c\n", index, json[index]);
+		printf("invalid json, in get_value at index %d, char: %c\n%s\n", index, json[index], json.c_str());
 		throw json_parser_exception{"Invalid json Exception"};
 	}
 	
@@ -323,14 +323,14 @@ int json_parser::get_value(std::string& json, int index, std::string& value)
 int json_parser::get_long_long_value(std::string& json, int index, long long& value)
 {
 	if (json[index] != ':') {
-		printf("invalid json, in get_value at index %d, char: %c, expect ':'\n", index, json[index]);
+		printf("invalid json, in get_value at index %d, char: %c, expect ':'\n%s\n", index, json[index], json.c_str());
 		throw json_parser_exception{"Invalid json Exception"};
 	}
 	
 	index = eat_white_sapce(json, ++index);
 	int start = index;
 
-	while (json[index] != ' ' && json[index] != '\t' && json[index] != '\n' && json[index] != ',')
+	while (json[index] != ' ' && json[index] != '\t' && json[index] != '\n' && json[index] != ',' && json[index] != '}')
 		index++;
 	
 	const std::string tmp = json.substr(start, index-start);
@@ -338,14 +338,14 @@ int json_parser::get_long_long_value(std::string& json, int index, long long& va
 	//TODO TODO error checking
 	value = std::atoll(tmp.c_str());
 	
-	return eat_white_sapce(json, ++index);
+	return eat_white_sapce(json, ((json[index] == '}') ? index : ++index));
 }
 
 
 int json_parser::get_bool_value(std::string& json, int index, bool& value)
 {
 	if (json[index] != ':') {
-		printf("invalid json, in get_value at index %d, char: %c, expect ':'\n", index, json[index]);
+		printf("invalid json, in get_value at index %d, char: %c, expect ':'\n%s\n", index, json[index], json.c_str());
 		throw json_parser_exception{"Invalid json Exception"};
 	}
 	
@@ -362,7 +362,7 @@ int json_parser::get_bool_value(std::string& json, int index, bool& value)
 	} else if (tmp == "false" || tmp == "False") {
 		value = false;
 	} else {
-		printf("invalid json, expected 'bool' value at %d, found: %s\n", index, tmp.c_str());
+		printf("invalid json, expected 'bool' value at %d, found: %s\n%s\n", index, tmp.c_str(), json.c_str());
 		throw json_parser_exception{"Invalid json Exception"};
 	}
 	
@@ -373,7 +373,7 @@ int json_parser::get_bool_value(std::string& json, int index, bool& value)
 int json_parser::verify_close_of_object(std::string& json, int index)
 {
 	if (json[index] != '}') {
-		printf("Invalid json, expected '}': %s\n", json.c_str());
+		printf("Invalid json, expected '}' at index %d, :\n %s\n", index, json.c_str());
 		throw json_parser_exception{"Invalid json Exception"};
 	}
 	
@@ -386,7 +386,7 @@ int json_parser::get_start_of_object(std::string& json, int index)
 	index = eat_white_sapce(json, index);
 	
 	if (json[index] != '{') {
-		printf("Invalid json, index %d has char %c\n", index, json[index]);
+		printf("Invalid json, index %d has char %c\n%s\n", index, json[index], json.c_str());
 		throw json_parser_exception{"Invalid json Exception"};
 	} 
 	

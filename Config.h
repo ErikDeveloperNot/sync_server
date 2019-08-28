@@ -11,7 +11,8 @@
 #define SERVER_CERT "cert.pem"
 #define SERVER_KEY "key.pem"
 #define SERVER_MAX_CONNECTIONS 200
-
+#define SERVER_KEEP_ALIVE 30
+#define SERVER_USE_KEEP_ALIVE_CLEANER true
 
 //database defaults
 #define DB_SERVER "localhost"
@@ -75,6 +76,8 @@ private:
 	std::string server_cert = SERVER_CERT;
 	std::string server_key = SERVER_KEY;
 	int server_max_connections = SERVER_MAX_CONNECTIONS;
+	int server_keep_alive = SERVER_KEEP_ALIVE;
+	bool server_use_keep_alive_cleaner = SERVER_USE_KEEP_ALIVE_CLEANER;
 	
 	std::string db_server = DB_SERVER;
 	std::string db_port = DB_PORT;
@@ -108,6 +111,8 @@ public:
 	void setServiceThreads(int service_threads) {this->service_threads = service_threads;}
 	void setSsl(bool ssl) {this->ssl = ssl;}
 	void setServerMaxConnections(int server_max_connections) {this->server_max_connections = server_max_connections;}
+	void setServerKeepAlive(int server_keep_alive) {this->server_keep_alive = server_keep_alive;}
+	void setServerUseKeepAliveCleaner(bool server_use_keep_alive_cleaner) {this->server_use_keep_alive_cleaner = server_use_keep_alive_cleaner;}
 	
 	bool isSsl() const {return ssl;}
 	const std::string& getBindAddress() const {return bind_address;}
@@ -124,6 +129,8 @@ public:
 	const std::string& getServerKey() const {return server_key;}
 	int getServiceThreads() const {return service_threads;}
 	int getServerMaxConnections() const {return server_max_connections;}
+	int getServerKeepAlive() const {return server_keep_alive;}
+	bool isServerUseKeepAliveCleaner() const {return server_use_keep_alive_cleaner;}
 	
 };
 

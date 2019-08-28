@@ -73,6 +73,10 @@ void Config::setKeyValue(char* key, char* value)
 		db_cleaner_purge_days = atoi(value);
 	} else if (strcmp(key, "server_max_connections") == 0) {
 		server_max_connections = atoi(value);
+	} else if (strcmp(key, "server_keep_alive") == 0) {
+		server_keep_alive = atoi(value);
+	} else if (strcmp(key, "server_use_keep_alive_cleaner") == 0) {
+		server_use_keep_alive_cleaner = (strcmp(value, "true") == 0) ? true: false;
 	}
 }
 
@@ -87,6 +91,7 @@ void Config::debugValues()
 	std::cout << "server cert: " << server_cert << std::endl;
 	std::cout << "server key" << server_key << std::endl;
 	std::cout << "server max connections: " << server_max_connections << std::endl;
+	std::cout << "server keep alive: " << server_keep_alive << std::endl;
 	std::cout << "db server: " << db_server << std::endl;
 	std::cout << "db port: " << db_port << std::endl;
 	std::cout << "db user: " << db_username << std::endl;

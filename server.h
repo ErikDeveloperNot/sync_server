@@ -11,8 +11,21 @@
 #include "openssl/err.h"
 
 #define END_IT -99
+#define STALE_TIMEOUT 30
 
 class Config;
+
+
+struct conn_meta
+{
+	int socket;
+	SSL *ssl;
+	long long last_used;
+	bool active;
+	
+	conn_meta(int s, SSL *_ssl, long long l, bool a) : socket{s}, ssl{_ssl}, last_used{l}, active{a} {}
+	conn_meta() = default;
+};
 
 
 class server
@@ -22,7 +35,8 @@ private:
 	std::string db_connection_string;
 	Config *config;
 	
-	std::queue<int> service_q;
+//	std::queue<int> service_q;
+	std::queue<conn_meta *> service_q;
 	std::mutex service_mutex;
 	std::condition_variable cv;
 	std::atomic_int current_connections;

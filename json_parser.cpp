@@ -330,7 +330,8 @@ int json_parser::get_long_long_value(std::string& json, int index, long long& va
 	index = eat_white_sapce(json, ++index);
 	int start = index;
 
-	while (json[index] != ' ' && json[index] != '\t' && json[index] != '\n' && json[index] != ',' && json[index] != '}')
+	while (json[index] != ' ' && json[index] != '\t' && json[index] != '\n' && json[index] != ',' && 
+		   json[index] != '}' && json[index] != ']')
 		index++;
 	
 	const std::string tmp = json.substr(start, index-start);
@@ -338,7 +339,7 @@ int json_parser::get_long_long_value(std::string& json, int index, long long& va
 	//TODO TODO error checking
 	value = std::atoll(tmp.c_str());
 	
-	return eat_white_sapce(json, ((json[index] == '}') ? index : ++index));
+	return eat_white_sapce(json, (json[index] == '}' || json[index] == ']') ? index : ++index);
 }
 
 
@@ -352,7 +353,8 @@ int json_parser::get_bool_value(std::string& json, int index, bool& value)
 	index = eat_white_sapce(json, ++index);
 	int start = index;
 
-	while (json[index] != ' ' && json[index] != '\t' && json[index] != '\n' && json[index] != ',')
+	while (json[index] != ' ' && json[index] != '\t' && json[index] != '\n' && json[index] != ',' &&
+		   json[index] != '}' && json[index] != ']')
 		index++;
 	
 	const std::string tmp = json.substr(start, index-start);
@@ -366,7 +368,7 @@ int json_parser::get_bool_value(std::string& json, int index, bool& value)
 		throw json_parser_exception{"Invalid json Exception"};
 	}
 	
-	return eat_white_sapce(json, ++index);
+	return eat_white_sapce(json, (json[index] == '}' || json[index] == ']') ? index : ++index);
 }
 
 

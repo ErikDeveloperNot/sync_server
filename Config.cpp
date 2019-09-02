@@ -91,6 +91,7 @@ void Config::debugValues()
 	std::cout << "server cert: " << server_cert << std::endl;
 	std::cout << "server key" << server_key << std::endl;
 	std::cout << "server max connections: " << server_max_connections << std::endl;
+	std::cout << "server use keep alive: " << server_use_keep_alive_cleaner << std::endl;
 	std::cout << "server keep alive: " << server_keep_alive << std::endl;
 	std::cout << "db server: " << db_server << std::endl;
 	std::cout << "db port: " << db_port << std::endl;

@@ -63,13 +63,12 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 					 std::map<std::string, User_info> &, fd_set &, std::map<int, conn_meta> &,
 					 std::mutex &fd_set_mutex, int);
 					 
-void session_cleaner_thread(std::atomic_int &connections, int keep_alive, fd_set &connection_fds,
-							std::mutex &connections_fds_mutex, std::map<int, conn_meta> &, int, int &);
+//void session_cleaner_thread(std::atomic_int &connections, int keep_alive, fd_set &connection_fds,
+//							std::mutex &connections_fds_mutex, std::map<int, conn_meta> &, int, int &);
 
 
 server::server(Config *config)
 {
-	int listen_sd = startListener(config);
 	this->config = config;
 	std::map<std::string, User_info> infos;
 	std::map<int, conn_meta> conn_map;
@@ -79,10 +78,9 @@ server::server(Config *config)
 	std::mutex connection_fds_mutex;
 	FD_ZERO(&connection_fds);
 	FD_ZERO(&read_fds);
-	int max_fd = listen_sd;
-	FD_SET(listen_sd, &connection_fds);
 	int rv;
 	int served;
+	int max_connections = config->getServerMaxConnections();
 	
 	//used for worker threads to wake up main from select call
 	int control[2];
@@ -98,12 +96,17 @@ server::server(Config *config)
 	FD_SET(control_keep_alive[0], &connection_fds);
 	FILE *control_keep_alive_file = fdopen(control_keep_alive[0], "r");
 	
+	int listen_sd = startListener(config);
+	int max_fd = listen_sd;
+	FD_SET(listen_sd, &connection_fds);
+	
 	printf("\n\n");
-	printf("Server fd: %d\n", listen_sd);
+	printf("Server fd: %d, max connections: %d\n", listen_sd, max_connections);
 	printf("control read fd: %d\n", control[0]);
 	printf("control write fd: %d\n", control[1]);
 	printf("control keep-alive read fd: %d\n", control_keep_alive[0]);
 	printf("control keep-alive write fd: %d\n\n", control_keep_alive[1]);
+printf("control READ is set in connection_fds: %d\n", FD_ISSET(control[0], &connection_fds));
 	
 	for (int i{1}; i<=config->getServiceThreads(); i++) {
 		std::thread t{service_thread, std::ref(service_q), std::ref(service_mutex), 
@@ -114,15 +117,16 @@ server::server(Config *config)
 		printf("Thread: %d, started\n", i);
 	}
 
-	
 	while (true) {
-		connection_fds_mutex.lock();
+connection_fds_mutex.lock();
 		read_fds = connection_fds;
-		connection_fds_mutex.unlock();
+connection_fds_mutex.unlock();
 		served = 0;
+
 		printf("Entering SELECT\n");
 		rv = select(max_fd+1, &read_fds, NULL, NULL, NULL);
 		printf("SELECT returned: %d\n", rv);
+
 
 		if (rv < 0) {
 			//error
@@ -145,75 +149,90 @@ server::server(Config *config)
 					served++;
 				//continue;
 			}
+			
+			
+			if (FD_ISSET(listen_sd, &read_fds)) {
+				//handle new connection
+				struct sockaddr_in addr;
+				socklen_t len = sizeof(addr);
+						
+				int client = accept(listen_sd, (struct sockaddr*)&addr, &len);
+				printf("Connection: %s:%d, client fd:%d\n",inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), client);
+						
+				if (current_connections >= max_connections) {
+					printf("Max Connections %d reached, rejecting\n", static_cast<int>(current_connections));
+					handleServerBusy(client);
+					continue;
+				}
 
+				if (client > max_fd)
+					max_fd = client;
+						
+				conn_map[client] = conn_meta(client, NULL, current_time_ms(), true);   //revisit time if I use this field
+				current_connections++;
+				std::lock_guard<std::mutex> lg{service_mutex};
+				service_q.push(&(conn_map[client]));
+				cv.notify_one();
+			
+				served++;
+			}
+
+			long long now = current_time_ms();
+			
 			for (int i=0; i<=max_fd; i++) {
 				if (rv == served) {
 					//all active fd handled, break
 					break;
 				}
 				
-				if (rv == control[0])
+				if (i == control[0] || i == listen_sd)
 					continue;
 					
-//				printf("1, %d\n", i);
 				if (FD_ISSET(i, &read_fds)) {
 					served++;
-//					printf("2\n");
-					if (i == listen_sd) {
-//						printf("3\n");
-						//handle new connection
-						struct sockaddr_in addr;
-						socklen_t len = sizeof(addr);
-						
-						int client = accept(listen_sd, (struct sockaddr*)&addr, &len);
-						printf("Connection: %s:%d, client fd:%d\n",inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), client);
-						
-						if (current_connections >= config->getServerMaxConnections()) {
-							printf("Max Connections %d reached, rejecting\n", static_cast<int>(current_connections));
-							handleServerBusy(client);
-							continue;
-						}
-
-						if (client > max_fd)
-							max_fd = client;
-							
-						conn_map[client] = conn_meta(client, NULL, 1L, true);   //revisit time if I use this field
-						current_connections++;
-						std::lock_guard<std::mutex> lg{service_mutex};
-						service_q.push(&(conn_map[client]));
-						cv.notify_one();
-					} else {
-						if (conn_map[i].active)		//fd is already being served
+					
+					if (conn_map[i].active)		//fd is already being served
 							continue;
 							
-						int n = 0;
-						ioctl(i, FIONREAD, &n);
+					int n = 0;
+					ioctl(i, FIONREAD, &n);
 						
-						if (n == 0) {
-							printf("closing client\n");
-connection_fds_mutex.lock();
-							FD_CLR(i, &connection_fds);
-connection_fds_mutex.unlock();
+					if (n == 0) {
+//						printf("closing client\n");
+//connection_fds_mutex.lock();
+//						FD_CLR(i, &connection_fds);
+//connection_fds_mutex.unlock();
+//
+//						SSL_free(conn_map[i].ssl);         /* release SSL state */
+//						close(i);
+//						printf("should be closed\n");
 
-							SSL_free(conn_map[i].ssl);         /* release SSL state */
-							close(i);
-							printf("should be closed\n");
-							current_connections--;
-							conn_map.erase(i);
-						} else if (n > 0) {
+						close_client(i, conn_map[i].ssl, connection_fds, connection_fds_mutex);
+						current_connections--;
+						conn_map.erase(i);
+					} else if (n > 0) {
 
 //TODO - revist to verify this client is not already active, if so ignore this
 printf(">>Removing client %d from connections_fds\n", i);
 connection_fds_mutex.lock();
-							FD_CLR(i, &connection_fds);
+						FD_CLR(i, &connection_fds);
 connection_fds_mutex.unlock();
-							std::lock_guard<std::mutex> lg{service_mutex};
-//							service_q.push(client);
-							conn_map[i].active = true;
-							service_q.push(&(conn_map[i]));
-							cv.notify_one();
-						} else {
-							printf("ERRRRRRROOOOORRRR - dont think i should see\n");
+						std::lock_guard<std::mutex> lg{service_mutex};
+						conn_map[i].active = true;
+						service_q.push(&(conn_map[i]));
+						cv.notify_one();
+					} else {
+						printf("ERRRRRRROOOOORRRR - dont think i should see\n");
+					}
+				} else {
+					// clean old sessions if enabled
+					if (config->isServerUseKeepAliveCleaner()) {
+						if (conn_map.count(i) > 0) {
+							if (now - conn_map[i].last_used > config->getServerKeepAlive() && !conn_map[i].active) {
+								close_client(i, conn_map[i].ssl, connection_fds, connection_fds_mutex);
+								current_connections--;
+								conn_map.erase(i);
+							}
 						}
 					}
 				}
@@ -329,13 +348,34 @@ void server::handleServerBusy(int client)
 	if ( SSL_accept(ssl) <= 0 )  {   /* do SSL-protocol accept/handshake */
 		ERR_print_errors_fp(stderr);
 	} else {
-//		const char *response = STATUS_503;
-		SSL_write(ssl, STATUS_503, strlen(STATUS_503));
+		const char * reply = configHttp.build_reply(HTTP_503, close_con);
+		SSL_write(ssl, reply, strlen(reply));
 	}
 	
 	SSL_free(ssl);         /* release SSL state */
 	close(client);
 
+}
+
+
+void server::close_client(int fd, SSL *ssl, fd_set & connections_fd, std::mutex &connection_fds_mutex)
+{
+	printf("closing client: %d\n", fd);
+	connection_fds_mutex.lock();
+	FD_CLR(fd, &connections_fd);
+	connection_fds_mutex.unlock();
+
+	SSL_free(ssl);          /* release SSL state */
+	close(fd);
+	printf("client %d should be closed\n", fd);
+//	current_connections--;
+//	conn_map.erase(i);
+}
+
+
+long long server::current_time_ms()
+{
+	return std::chrono::system_clock::now().time_since_epoch().count()/1000;
 }
 
 
@@ -356,6 +396,7 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 	const char *t_id = t.c_str();
 	
 	sync_handler handler{t, config, infos};
+	config_http configHttp;
 	
 	SSL *ssl;
 	conn_meta *client;
@@ -364,7 +405,6 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 	
 	while (true) {
 //		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-//		int client;
 		
 		{
 			std::unique_lock<std::mutex> lock{q_mutex};
@@ -385,6 +425,7 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 				q.pop();
 			}
 		}
+		
 		
 		bool ssl_errros{false};
 		
@@ -413,35 +454,44 @@ printf("New SSL session needed\n");
 				bool valid{true};
 				printf("http header bytes read: %d, header\n%s\n", header.length(), header.c_str());
 
-				std::string reply;
+				const char * reply;
 
 				try {
 					if (parse_header(header, operation, contentLength, requestType)) {
-						if (requestType ==  request_type::POST && read_incoming_bytes(client->ssl, request, std::stoi(contentLength))) {
 
-							if (operation == SYNC_INITIAL) {
-								std::string replyMsg = handler.handle_request(operation, request, requestType);
-								reply = STATUS_200_INITIAL_SYNC + std::to_string(replyMsg.length()) + "\r\n\r\n" + replyMsg;
+						if (requestType ==  request_type::POST) {
+							//check if json is included with headers - Revisit to make a much better parser
+							int content_length = std::stoi(contentLength);
+							
+							if (content_length < 2)
+								throw register_server_exception(configHttp.build_reply(HTTP_400, close_con));
+
+							std::string::size_type loc = header.find("{", 0);
+							if (loc != std::string::npos) {
+								//assuming { would never should up in any header???
+								request = header.substr(loc, std::string::npos-loc);
 							} else {
-								std::string replyMsg = handler.handle_request(operation, request, requestType);
-								reply = STATUS_200 + std::to_string(replyMsg.length()) + "\r\n\r\n" + replyMsg;
-//								reply = STATUS_200 + handler.handle_request(operation, request, requestType);
+								read_incoming_bytes(client->ssl, request, content_length);
 							}
-
+							
+							if (request.size() < 2)
+								throw register_server_exception(configHttp.build_reply(HTTP_400, close_con));
+							
+							std::string replyMsg = handler.handle_request(operation, request, requestType);
+							reply = configHttp.build_reply(HTTP_200, keep_alive, replyMsg);
 						} else if (requestType == request_type::GET) {
-							reply = STATUS_200 + 
-								handler.handle_request(operation, request, requestType);
+							std::string replyMsg = handler.handle_request(operation, request, requestType);
+							reply = configHttp.build_reply(HTTP_200, keep_alive, replyMsg);
 						} else {
-							reply = STATUS_400;
+							reply = configHttp.build_reply(HTTP_400, close_con);
 						}
 						
-						int written = SSL_write(client->ssl, reply.c_str(), reply.length());
-//						client->active = false;
-						printf("Bytes written: %d\n, reply:\n%s\n", written, reply.c_str());
-
+						int written = SSL_write(client->ssl, reply, strlen(reply));
+						printf("Bytes written: %d\n, reply:\n%s\n", written, reply);
+						free((char*)reply);
 					}
 				} catch (register_server_exception &ex) {
-					printf("\n%s: Error:\nHeader\n%s\nRequest\n%s\nError: %s\n", t_id, 
+					printf("\n%s: Error:\nHeader\n%s\nRequest\n%s\nError\n%s\n", t_id, 
 							header.c_str(), request.c_str(), ex.what());
 					SSL_write(client->ssl, ex.what(), strlen(ex.what()));
 				}
@@ -449,10 +499,11 @@ printf("New SSL session needed\n");
 		}
 
 printf(">> Adding client %d back to connections_fd\n", client->socket);
-		connections_fd_mutex.lock();
+connections_fd_mutex.lock();
 		FD_SET(client->socket, &connections_fd);
+		client->last_used = std::chrono::system_clock::now().time_since_epoch().count()/1000;
 		client->active = false;
-		connections_fd_mutex.unlock();
+connections_fd_mutex.unlock();
 		write(control, control_buf, 1);
 		
 	}
@@ -471,12 +522,15 @@ bool verify_request(std::string &method, std::string &operation)
 			return true;
 		else if (operation == SYNC_FINAL)
 			return true;
-		else
-			throw register_server_exception{STATUS_400};
+		else {
+			config_http configHttp;
+			throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
+		}
 	} else if (method == HTTP_GET && operation == REGISTER_CONFIG) {
 		return true;
 	} else {
-		throw register_server_exception{STATUS_400};
+		config_http configHttp;
+		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
 	}
 }
 
@@ -514,7 +568,7 @@ bool parse_header(std::string &header, std::string &operation, std::string &cont
 		return false;
 		
 	std::string method = resource.substr(0, loc);
-				
+
 	//get operation
 	std::string::size_type loc2 = resource.find(" ", loc+1);
 
@@ -530,10 +584,12 @@ bool parse_header(std::string &header, std::string &operation, std::string &cont
 		requestType = request_type::GET;
 	} else if (method == HTTP_POST) {	
 		requestType = request_type::POST;
-		loc = header.find(HTTP_CONTENT_LENGTH);
-				 
+		loc = header.find(HTTP_CONTENT_LENGTH_UPPER);
+
 		if (loc == std::string::npos)
-			return false;
+			loc = header.find(HTTP_CONTENT_LENGTH_LOWER);
+			if (loc == std::string::npos)
+				return false;
 
 		loc2 = header.find("\n", loc);
 		contentLength = header.substr(loc+16, loc2-loc+16);
@@ -543,24 +599,31 @@ bool parse_header(std::string &header, std::string &operation, std::string &cont
 }
 
 
-void session_cleaner_thread(std::atomic_int &connections, int keep_alive, fd_set &connection_fds,
-							std::mutex &connections_fds_mutex, std::map<int, conn_meta> &client_connections, 
-							int control_fd, int &max_fd)
-{
-	//std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-	printf("keep alive session thread starting, thread interval: %d seconds\n", keep_alive/2);
-	int sleep_interval = (keep_alive/2) * 1000;
-	std::vector<int> to_close;
-	
-	while (true) {
-		std::this_thread::sleep_for(std::chrono::milliseconds(sleep_interval));
-		int checked = 0;
-		int size = client_connections.size();
-		
-		for (int i=0; i<max_fd && checked<size; i++) {
-			if (client_connections.count(i) > 0) {
-				
-			}
-		}
-	}
-}
+/*
+ * NOT USED FOR NOW
+ */
+//void session_cleaner_thread(std::atomic_int &connections, int keep_alive, fd_set &connection_fds,
+//							std::mutex &connections_fds_mutex, std::map<int, conn_meta> &client_connections, 
+//							int control_fd, int &max_fd)
+//{
+//	//std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+//	printf("keep alive session thread starting, thread interval: %d seconds\n", keep_alive/2);
+//	int sleep_interval = (keep_alive/2) * 1000;
+//	std::vector<int> to_close;
+//	
+//	while (true) {
+//		std::this_thread::sleep_for(std::chrono::milliseconds(sleep_interval));
+//		int checked = 0;
+//		int size = client_connections.size();
+//		
+//		connections_fds_mutex.lock();
+//		for (int i=0; i<max_fd && checked<size; i++) {
+//			if (client_connections.count(i) > 0) {
+//				
+//			}
+//		}
+//		connections_fds_mutex.unlock();
+//	}
+//}
+
+

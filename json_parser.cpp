@@ -16,16 +16,6 @@ register_config_request json_parser::parse_delete_account(std::string& json)
 
 register_config_request json_parser::parse_user(std::string& json, bool register_config)
 {
-//	printf("json object:\n%s\n", json.c_str());
-	
-//	int index = eat_white_sapce(json, 0);
-//	
-//	if (json[index] != '{') {
-//		printf("Invalid json, index %d has char %c\n", index, json[index]);
-//		throw json_parser_exception{"Invalid json Exception"};
-//	} 
-//	
-//	index = eat_white_sapce(json, ++index);
 	int index = get_start_of_object(json, 0);
 	
 	register_config_request registerConfigReq;
@@ -276,7 +266,7 @@ sync_final_request json_parser::parse_sync_final(std::string& json)
 
 int json_parser::eat_white_sapce(std::string& json, int index)
 {
-	while (json[index] == ' ' || json[index] == '\t' || json[index] == '\n')
+	while (json[index] == ' ' || json[index] == '\t' || json[index] == '\n' || json[index] == '\r')
 		index++;
 		
 	return index;
@@ -287,6 +277,7 @@ int json_parser::get_key(std::string& json, int index, std::string& key)
 {
 	if (json[index] != '"') {
 		printf("invalid json, in get_key at index %d, char: %c\n%s\n", index, json[index], json.c_str());
+		printf("int value: %d\n", ((int)json[index]));
 		throw json_parser_exception{"Invalid json Exception"};
 	}
 	
@@ -330,8 +321,11 @@ int json_parser::get_long_long_value(std::string& json, int index, long long& va
 	index = eat_white_sapce(json, ++index);
 	int start = index;
 
-	while (json[index] != ' ' && json[index] != '\t' && json[index] != '\n' && json[index] != ',' && 
-		   json[index] != '}' && json[index] != ']')
+//	while (json[index] != ' ' && json[index] != '\t' && json[index] != '\n' && json[index] != ',' && 
+//		   json[index] != '}' && json[index] != ']')
+//		index++;
+		
+	while (json[index] >= 48 && json[index] <= 57)
 		index++;
 	
 	const std::string tmp = json.substr(start, index-start);
@@ -353,8 +347,11 @@ int json_parser::get_bool_value(std::string& json, int index, bool& value)
 	index = eat_white_sapce(json, ++index);
 	int start = index;
 
-	while (json[index] != ' ' && json[index] != '\t' && json[index] != '\n' && json[index] != ',' &&
-		   json[index] != '}' && json[index] != ']')
+//	while (json[index] != ' ' && json[index] != '\t' && json[index] != '\n' && json[index] != ',' &&
+//		   json[index] != '}' && json[index] != ']')
+//		index++;
+		
+	while ((json[index] >= 65 && json[index] <= 90) || (json[index] >= 97 && json[index] <= 122))
 		index++;
 	
 	const std::string tmp = json.substr(start, index-start);

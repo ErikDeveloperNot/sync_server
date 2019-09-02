@@ -65,7 +65,7 @@ std::string sync_handler::handle_request(std::string &resource, std::string &req
 	} else if (resource == SYNC_FINAL) {
 		return handle_sync_final(request);
 	} else {
-		return STATUS_400;
+		return "{ error: \"Bad Request\" }";;
 	}
 }
 
@@ -79,7 +79,8 @@ std::string sync_handler::handle_register(std::string& request)
 	try {
 		registerConfigReq = parser.parse_register_config(request);
 	} catch (json_parser_exception &ex) {
-		throw register_server_exception{STATUS_400};
+//		throw register_server_exception{STATUS_400};
+		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
 	}
 	
 	//hash password
@@ -108,7 +109,8 @@ std::string sync_handler::handle_register(std::string& request)
 			user_infos.erase(user.account_uuid);
 			user_infos_lock.unlock();
 			user_infos_cv.notify_one();
-			throw register_server_exception{STATUS_500_SERVER_ERROR};
+//			throw register_server_exception{STATUS_500_SERVER_ERROR};
+			throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 		} else {
 			// unlock user
 			unlock_user(user.account_uuid);
@@ -117,7 +119,8 @@ std::string sync_handler::handle_register(std::string& request)
 		//user already exist return
 		user_infos_lock.unlock();
 		user_infos_cv.notify_one();
-		throw register_server_exception{STATUS_500_USER_EXISTS};
+//		throw register_server_exception{STATUS_500_USER_EXISTS};
+		throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 	}
 	
 
@@ -150,28 +153,20 @@ std::string sync_handler::handle_delete(std::string& request)
 	try {
 		registerConfigReq = parser.parse_delete_account(request);
 	} catch (json_parser_exception &ex) {
-		throw register_server_exception{STATUS_400};
+		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
 	}
 
 	lock_user(registerConfigReq.email);
 	
-	std::string hashedPass = registerConfigReq.password;
-	if (!hash_password(hashedPass)) {
-		printf("Unable to hash password %s for account %s\n", registerConfigReq.password.c_str(), registerConfigReq.email.c_str());
+	if (!verify_password(registerConfigReq.email, registerConfigReq.password)) {
 		unlock_user(registerConfigReq.email);
-		throw register_server_exception{STATUS_401};
-	}
-	
-	if (hashedPass != user_infos[registerConfigReq.email].user.account_password) {
-		printf("Invalid password %s for account %s\n", hashedPass.c_str(), registerConfigReq.email.c_str());
-		unlock_user(registerConfigReq.email);
-		throw register_server_exception{STATUS_401};
+		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
 	if (!store.delete_user(user_infos[registerConfigReq.email].user)) {
 		printf("Error deleting account %s from the database\n", registerConfigReq.email.c_str());
 		unlock_user(registerConfigReq.email);
-		throw register_server_exception{STATUS_500_SERVER_ERROR};
+		throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 	}
 	
 	user_infos_lock.lock();
@@ -179,7 +174,7 @@ std::string sync_handler::handle_delete(std::string& request)
 	user_infos_lock.unlock();
 	user_infos_cv.notify_one();
 	
-	return "Account has been deleted.";
+	return "{ msg: \"Account has been deleted\" }";
 }
 
 
@@ -192,22 +187,16 @@ std::string sync_handler::handle_sync_initial(std::string& request)
 	try {
 		syncReq = parser.parse_sync_initial(request);
 	} catch (json_parser_exception &ex) {
-		throw register_server_exception{STATUS_400};
+		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
 	}
 
 	sync_initial_response syncResp;
 	syncResp.lockTime = lock_user(syncReq.registerConfigReq.email);
 	syncResp.responseCode = 0; //TODO TODO -  check on this
 	
-	if (!hash_password(syncReq.registerConfigReq.password)  || 
-		syncReq.registerConfigReq.password != user_infos[syncReq.registerConfigReq.email].user.account_password) {
-			
-		printf("Invalid password sent for user: %s, sent: %s, expected %s\n", syncReq.registerConfigReq.email.c_str(),
-					syncReq.registerConfigReq.password.c_str(), 
-					user_infos[syncReq.registerConfigReq.email].user.account_password.c_str());
-					
+	if (!verify_password(syncReq.registerConfigReq.email, syncReq.registerConfigReq.password)) {
 		unlock_user(syncReq.registerConfigReq.email);
-		throw register_server_exception{STATUS_401};
+		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
 	std::map<std::string, Account> accounts = store.get_accounts_for_user(syncReq.registerConfigReq.email);
@@ -252,7 +241,13 @@ std::string sync_handler::handle_sync_final(std::string& request)
 	try {
 		syncFinal = parser.parse_sync_final(request);
 	} catch (json_parser_exception &ex) {
-		throw register_server_exception{STATUS_400};
+//		throw register_server_exception{STATUS_400};
+		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
+	}
+	
+	if (!verify_password(syncFinal.user, syncFinal.password)) {
+		unlock_user(syncFinal.user);
+		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
 	long long relockTime = relock_user(syncFinal.user, syncFinal.lockTime);
@@ -262,19 +257,21 @@ std::string sync_handler::handle_sync_final(std::string& request)
 		if (!store.update_last_sync_for_user(syncFinal.user, relockTime)) {
 			printf("Failed to update last SyncTime for user: %s in syncFinal\n", syncFinal.user.c_str());
 			unlock_user(syncFinal.user);
-			throw register_server_exception{STATUS_500_SERVER_ERROR};
+//			throw register_server_exception{STATUS_500_SERVER_ERROR};
+			throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 		}
 	} else {
 		//means there was at least 1 failure, so dont update last sync time so another sync can be done
 		printf("Failed to update accounts for user: %s in syncFinal\n", syncFinal.user.c_str());
 		unlock_user(syncFinal.user);
-		throw register_server_exception{STATUS_500_SERVER_ERROR};
+//		throw register_server_exception{STATUS_500_SERVER_ERROR};
+		throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 	}
 	
 	//unlock user
 	unlock_user(syncFinal.user);
 	
-	return "Sync Final Complete";
+	return "{ msg : \"Sync Final Complete\" }";
 }
 
 
@@ -293,7 +290,8 @@ long long sync_handler::lock_user(std::string& forUser)
 		lock.unlock();
 		user_infos_cv.notify_one();
 
-		throw register_server_exception{STATUS_401};
+//		throw register_server_exception{STATUS_401};
+		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
 	long long current_lock = current_time_ms();
@@ -312,7 +310,8 @@ long long sync_handler::lock_user(std::string& forUser)
 		if (current_lock - user_infos[forUser].lock_time < LOCK_TIMEOUT) {
 			lock.unlock();
 			user_infos_cv.notify_one();
-			throw register_server_exception{STATUS_503};
+//			throw register_server_exception{STATUS_503.c_str()};
+			throw register_server_exception{configHttp.build_reply(HTTP_503, close_con)};
 		}
 	}
 	
@@ -335,12 +334,13 @@ long long sync_handler::relock_user(std::string& forUser, long long userLock)
 		lock.unlock();
 		user_infos_cv.notify_one();
 
-		throw register_server_exception{STATUS_401};
+//		throw register_server_exception{STATUS_401};
+		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
 	if (userLock != user_infos[forUser].lock_time) {
 		//slow client fail
-		throw register_server_exception{STATUS_401};
+		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	} else {
 		toReturn = current_time_ms();
 		user_infos[forUser].lock_time = toReturn;
@@ -373,6 +373,22 @@ void sync_handler::debug_user_infos()
 	for (auto &k : user_infos) {
 		printf("%s, %lld\n", k.first.c_str(), user_infos[k.first].lock_time);
 	}
+}
+
+
+bool sync_handler::verify_password(std::string & user, std::string & pw)
+{
+	if (!hash_password(pw)) {
+		printf("Unable to hash password %s for account %s\n", pw.c_str(), user.c_str());
+		return false;
+	}
+	
+	if (pw != user_infos[user].user.account_password) {
+		printf("Invalid password %s for account %s\n", pw.c_str(), user.c_str());
+		return false;
+	}
+	
+	return true;
 }
 
 

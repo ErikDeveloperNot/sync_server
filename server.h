@@ -9,6 +9,7 @@
 
 #include "openssl/ssl.h"
 #include "openssl/err.h"
+#include "config_http.h"
 
 #define END_IT -99
 #define STALE_TIMEOUT 30
@@ -34,6 +35,7 @@ private:
 	
 	std::string db_connection_string;
 	Config *config;
+	config_http configHttp;
 	
 //	std::queue<int> service_q;
 	std::queue<conn_meta *> service_q;
@@ -46,6 +48,8 @@ private:
 
 	int startListener(Config *config);
 	void handleServerBusy(int);
+	void close_client(int, SSL *, fd_set &, std::mutex &);
+	long long current_time_ms();
 public:
 	server(Config *config);
 	~server();

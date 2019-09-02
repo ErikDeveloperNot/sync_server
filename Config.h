@@ -12,7 +12,7 @@
 #define SERVER_KEY "key.pem"
 #define SERVER_MAX_CONNECTIONS 200
 #define SERVER_KEEP_ALIVE 30
-#define SERVER_USE_KEEP_ALIVE_CLEANER true
+#define SERVER_USE_KEEP_ALIVE_CLEANER false
 
 //database defaults
 #define DB_SERVER "localhost"

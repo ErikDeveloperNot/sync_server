@@ -3,13 +3,17 @@
 
 #include <string>
 #include <queue>
+#include <vector>
+#include <map>
 #include <mutex>
+#include <thread>
 #include <atomic>
 #include <condition_variable>
 
 #include "openssl/ssl.h"
 #include "openssl/err.h"
 #include "config_http.h"
+#include "config.h"
 
 #define END_IT -99
 #define STALE_TIMEOUT 30
@@ -37,7 +41,8 @@ private:
 	Config *config;
 	config_http configHttp;
 	
-//	std::queue<int> service_q;
+	// service thread variables
+	std::vector<std::thread> service_threads;
 	std::queue<conn_meta *> service_q;
 	std::mutex service_mutex;
 	std::condition_variable cv;
@@ -45,15 +50,40 @@ private:
 	
 	SSL_CTX *ctx;
 
-
+	std::map<std::string, User_info> infos;
+	std::map<int, conn_meta> conn_map;
+	
+	// socket server variables
+	fd_set connection_fds;
+	fd_set read_fds;
+	std::mutex connection_fds_mutex;
+	int rv;
+	int served;
+	int max_connections;
+	int listen_sd;
+	int max_fd;
+	
+	// variables for file descriptor used by service threads
+	int control[2];
+	char control_buf[10];
+	FILE *control_file;
+	
+//	int control_keep_alive[2];
+//	char control_keep_alive_buf[10];
+//	FILE *control_keep_alive_file;
+	
+	
 	int startListener(Config *config);
 	void handleServerBusy(int);
 	void close_client(int, SSL *, fd_set &, std::mutex &);
 	long long current_time_ms();
+
 public:
 	server(Config *config);
-	~server();
+	~server() = default;
 
+	void start();
+	void shutdown(bool immdeiate);
 };
 
 #endif // _SERVER_H_

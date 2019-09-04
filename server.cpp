@@ -1,16 +1,12 @@
 #include "server.h"
-#include "Config.h"
 #include "sync_handler.h"
 #include "config_http.h"
 #include "register_server_exception.h"
 
-#include <thread>
 #include <iostream>
 #include <atomic>
 #include <string>
 #include <string.h>
-#include <map>
-#include <vector>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -63,70 +59,63 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 					 std::map<std::string, User_info> &, fd_set &, std::map<int, conn_meta> &,
 					 std::mutex &fd_set_mutex, int);
 					 
-//void session_cleaner_thread(std::atomic_int &connections, int keep_alive, fd_set &connection_fds,
-//							std::mutex &connections_fds_mutex, std::map<int, conn_meta> &, int, int &);
 
 
-server::server(Config *config)
+server::server(Config *conf)
 {
-	this->config = config;
-	std::map<std::string, User_info> infos;
-	std::map<int, conn_meta> conn_map;
-	
-	fd_set connection_fds;
-	fd_set read_fds;
-	std::mutex connection_fds_mutex;
+	config = conf;
+
 	FD_ZERO(&connection_fds);
 	FD_ZERO(&read_fds);
-	int rv;
-	int served;
-	int max_connections = config->getServerMaxConnections();
+	max_connections = config->getServerMaxConnections();
 	
-	//used for worker threads to wake up main from select call
-	int control[2];
 	pipe(control);
-	char control_buf[10];
 	FD_SET(control[0], &connection_fds);
-	FILE *control_file = fdopen( control[0], "r" );
+	control_file = fdopen( control[0], "r" );
 	
-	//used for eol session cleaner thread
-	int control_keep_alive[2];
-	pipe(control_keep_alive);
-	char control_keep_alive_buf[10];
-	FD_SET(control_keep_alive[0], &connection_fds);
-	FILE *control_keep_alive_file = fdopen(control_keep_alive[0], "r");
-	
-	int listen_sd = startListener(config);
-	int max_fd = listen_sd;
+	listen_sd = startListener(config);
+	max_fd = listen_sd;
 	FD_SET(listen_sd, &connection_fds);
 	
 	printf("\n\n");
 	printf("Server fd: %d, max connections: %d\n", listen_sd, max_connections);
 	printf("control read fd: %d\n", control[0]);
 	printf("control write fd: %d\n", control[1]);
-	printf("control keep-alive read fd: %d\n", control_keep_alive[0]);
-	printf("control keep-alive write fd: %d\n\n", control_keep_alive[1]);
-printf("control READ is set in connection_fds: %d\n", FD_ISSET(control[0], &connection_fds));
-	
+
 	for (int i{1}; i<=config->getServiceThreads(); i++) {
 		std::thread t{service_thread, std::ref(service_q), std::ref(service_mutex), 
 						std::ref(cv), ctx, i, std::ref(current_connections), config, std::ref(infos),
 						std::ref(connection_fds), std::ref(conn_map), std::ref(connection_fds_mutex),
 						control[1]};
-		t.detach();
+
+		service_threads.push_back(std::move(t));
 		printf("Thread: %d, started\n", i);
 	}
+}
 
-	while (true) {
+
+void server::start()
+{
+	struct timeval tv;
+	tv.tv_sec = config->getServerKeepAlive();
+	tv.tv_usec = 0;
+	int keep_alive = config->getServerKeepAlive();
+	bool use_keep_alive = config->isServerUseKeepAliveCleaner();
+	
+		while (true) {
 connection_fds_mutex.lock();
 		read_fds = connection_fds;
 connection_fds_mutex.unlock();
 		served = 0;
 
-		printf("Entering SELECT\n");
-		rv = select(max_fd+1, &read_fds, NULL, NULL, NULL);
-		printf("SELECT returned: %d\n", rv);
-
+//		printf("Entering SELECT\n");
+		
+		if (use_keep_alive)
+			rv = select(max_fd+1, &read_fds, NULL, NULL, &tv);
+		else
+			rv = select(max_fd+1, &read_fds, NULL, NULL, NULL);
+			
+//		printf("SELECT returned: %d\n", rv);
 
 		if (rv < 0) {
 			//error
@@ -134,8 +123,18 @@ connection_fds_mutex.unlock();
 			perror("select");
 			
 		} else if (rv == 0) {
-			//timeout - may use to look for stale connections if don't reply on default os settings
-			printf("Error: Result value from select = 0, timeout is not being used?\n");
+			// clean old sessions if enabled
+			long long now = current_time_ms();
+			
+			for (int i{0}; i <=max_fd; i++) {
+				if (conn_map.count(i) > 0) {
+					if (now - conn_map[i].last_used > keep_alive && !conn_map[i].active) {
+						close_client(i, conn_map[i].ssl, connection_fds, connection_fds_mutex);
+						current_connections--;
+						conn_map.erase(i);
+					}
+				}
+			}
 		} else {
 			printf("max_fd = %d\n", max_fd);
 			if (FD_ISSET(control[0], &read_fds)) {
@@ -226,9 +225,9 @@ connection_fds_mutex.unlock();
 					}
 				} else {
 					// clean old sessions if enabled
-					if (config->isServerUseKeepAliveCleaner()) {
+					if (use_keep_alive) {
 						if (conn_map.count(i) > 0) {
-							if (now - conn_map[i].last_used > config->getServerKeepAlive() && !conn_map[i].active) {
+							if (now - conn_map[i].last_used > keep_alive && !conn_map[i].active) {
 								close_client(i, conn_map[i].ssl, connection_fds, connection_fds_mutex);
 								current_connections--;
 								conn_map.erase(i);
@@ -240,25 +239,6 @@ connection_fds_mutex.unlock();
 			}
 		}
 	}
-}
-
-
-server::~server()
-{
-	printf("Server shutting down, waiting for threads to complete\n");
-	
-	for (size_t i{0}; i<config->getServiceThreads(); i++) {
-		std::lock_guard<std::mutex> lg{service_mutex};
-//		service_q.push(END_IT); REVISIT
-		cv.notify_one();
-	}
-	
-	do {
-		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-		printf("Checking if service threads are complete\n");
-	} while (service_q.size() > 1);
-	
-	printf("Server done\n");
 }
 
 
@@ -377,6 +357,30 @@ long long server::current_time_ms()
 {
 	return std::chrono::system_clock::now().time_since_epoch().count()/1000;
 }
+
+
+void server::shutdown(bool immdeiate)
+{
+	if (!immdeiate) {
+		printf("Server shutting down, waiting for threads to complete\n");
+		conn_meta c {-1, nullptr, END_IT, false};
+			
+		for (size_t i{0}; i<config->getServiceThreads(); i++) {
+			std::lock_guard<std::mutex> lg{service_mutex};
+			service_q.push(&c); 
+			cv.notify_one();
+		}
+	
+		for (size_t i{0}; i<config->getServiceThreads(); i++) {
+			printf("Waiting for thread: %d\n", i+1);
+			service_threads[i].join();
+		}
+	}
+	
+	
+	printf("Server done\n");
+}
+
 
 
 // functions used by service thread
@@ -597,33 +601,4 @@ bool parse_header(std::string &header, std::string &operation, std::string &cont
 	
 	return true;
 }
-
-
-/*
- * NOT USED FOR NOW
- */
-//void session_cleaner_thread(std::atomic_int &connections, int keep_alive, fd_set &connection_fds,
-//							std::mutex &connections_fds_mutex, std::map<int, conn_meta> &client_connections, 
-//							int control_fd, int &max_fd)
-//{
-//	//std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-//	printf("keep alive session thread starting, thread interval: %d seconds\n", keep_alive/2);
-//	int sleep_interval = (keep_alive/2) * 1000;
-//	std::vector<int> to_close;
-//	
-//	while (true) {
-//		std::this_thread::sleep_for(std::chrono::milliseconds(sleep_interval));
-//		int checked = 0;
-//		int size = client_connections.size();
-//		
-//		connections_fds_mutex.lock();
-//		for (int i=0; i<max_fd && checked<size; i++) {
-//			if (client_connections.count(i) > 0) {
-//				
-//			}
-//		}
-//		connections_fds_mutex.unlock();
-//	}
-//}
-
 

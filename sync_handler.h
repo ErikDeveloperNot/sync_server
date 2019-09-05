@@ -3,6 +3,7 @@
 
 #include "data_store_connection.h"
 #include "Config.h"
+#include "config_http.h"
 
 #include <string>
 #include <mutex>
@@ -13,12 +14,6 @@
 
 static std::once_flag onceFlag;
 
-
-extern char * STATUS_400;
-extern char * STATUS_401;
-extern char * STATUS_500_USER_EXISTS;
-extern char * STATUS_500_SERVER_ERROR;
-extern char * STATUS_503;
 
 const long LOCK_TIMEOUT = 30000L;
 
@@ -31,6 +26,7 @@ private:
 	std::map<std::string, User_info> &user_infos;
 	std::mutex user_infos_lock;
 	std::condition_variable user_infos_cv;
+	config_http configHttp;
 	
 	long long current_time_ms();
 	
@@ -46,6 +42,7 @@ private:
 	long long relock_user(std::string & forUser, long long lock);
 	void unlock_user(std::string & forUser);
 	
+	bool verify_password(std::string & user, std::string & pw);
 	bool hash_password(std::string &);
 	void debug_user_infos();
 public:

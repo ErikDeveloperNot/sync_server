@@ -573,7 +573,7 @@ bool parse_header(std::string &header, std::string &operation, std::string &cont
 		
 	std::string method = resource.substr(0, loc);
 
-	//get operation
+  //get operation
 	std::string::size_type loc2 = resource.find(" ", loc+1);
 
 	if (loc2 == std::string::npos) 

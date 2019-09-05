@@ -321,10 +321,6 @@ int json_parser::get_long_long_value(std::string& json, int index, long long& va
 	index = eat_white_sapce(json, ++index);
 	int start = index;
 
-//	while (json[index] != ' ' && json[index] != '\t' && json[index] != '\n' && json[index] != ',' && 
-//		   json[index] != '}' && json[index] != ']')
-//		index++;
-		
 	while (json[index] >= 48 && json[index] <= 57)
 		index++;
 	

@@ -1,4 +1,5 @@
 #include "register_server_exception.h"
+#include <cstring>
 
 register_server_exception::register_server_exception(char* msg) : copyContructed{true} 
 {

@@ -13,7 +13,7 @@
 #include "openssl/ssl.h"
 #include "openssl/err.h"
 #include "config_http.h"
-#include "config.h"
+#include "Config.h"
 
 #define END_IT -99
 #define STALE_TIMEOUT 30

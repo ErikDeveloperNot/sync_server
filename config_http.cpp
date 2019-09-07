@@ -1,5 +1,5 @@
 #include "config_http.h"
-
+#include <cstring>
 
 const char* config_http::build_reply(http_status status, http_connection con) 
 {

@@ -277,7 +277,7 @@ std::string sync_handler::handle_sync_final(std::string& request)
 
 long long sync_handler::current_time_ms()
 {
-//	printf("%ld\n", std::chrono::system_clock::now().time_since_epoch().count()/1000);
+//	printf("-----------%lld\n", std::chrono::system_clock::now().time_since_epoch().count()/1000);
 	return std::chrono::system_clock::now().time_since_epoch().count()/1000;
 }
 
@@ -295,15 +295,25 @@ long long sync_handler::lock_user(std::string& forUser)
 	}
 	
 	long long current_lock = current_time_ms();
-
+//printf("######### %lld : %lld : %lld\n", current_lock, user_infos[forUser].lock_time, LOCK_TIMEOUT);
 	if (current_lock - user_infos[forUser].lock_time < LOCK_TIMEOUT) {
-		auto sec = std::chrono::seconds((current_lock - user_infos[forUser].lock_time) / 1000 + 1);
+		printf("%s - waiting for lock for user: %s\n", t_id.c_str(), forUser.c_str());
+//		auto sec = std::chrono::seconds((current_lock - user_infos[forUser].lock_time) / 50); //1000 + 1);
+		auto milliSec = std::chrono::milliseconds(200);
 		
-		while (!user_infos_cv.wait_for(lock, sec, [&]() {
+		while (!user_infos_cv.wait_for(lock, milliSec, [&]() {
 			current_lock = current_time_ms();
-			printf("check if %lld - %lld > %lld\n", current_lock, user_infos[forUser].lock_time, sec);
+			printf("%s - check if \(%lld - %lld = %lld\) > %lld\n", t_id.c_str(), current_lock, user_infos[forUser].lock_time,
+					(current_lock - user_infos[forUser].lock_time), LOCK_TIMEOUT);
 			return (current_lock - user_infos[forUser].lock_time > LOCK_TIMEOUT);
 		})) {}
+
+//		user_infos_cv.wait(lock, [&]() {
+//			current_lock = current_time_ms();
+//			printf("%s - check if \(%lld - %lld = %lld\) > %lld\n", t_id.c_str(), current_lock, user_infos[forUser].lock_time,
+//					(current_lock - user_infos[forUser].lock_time, LOCK_TIMEOUT));
+//			return (current_lock - user_infos[forUser].lock_time > LOCK_TIMEOUT);
+//		});
 		
 		//if still locked throw 503
 		current_lock = current_time_ms();

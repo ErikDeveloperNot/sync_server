@@ -53,6 +53,14 @@ static const std::string UPSERT_ACCOUNT_PREPARE = "INSERT INTO Accounts VALUES (
 													"EXCLUDED.old_password, url = EXCLUDED.url, update_time = EXCLUDED.update_time, "
 													"deleted = EXCLUDED.deleted";
 
+//testing
+static const std::string UPSERT_ACCOUNT_PREPARE_1 = "INSERT INTO Accounts VALUES ";
+static const std::string UPSERT_ACCOUNT_PREPARE_2 = "on conflict (account_name, account_uuid) DO UPDATE "
+													"SET user_name = EXCLUDED.user_name, password = EXCLUDED.password, old_password = "
+													"EXCLUDED.old_password, url = EXCLUDED.url, update_time = EXCLUDED.update_time, "
+													"deleted = EXCLUDED.deleted"; 
+//end testing
+
 
 //static const std::string UPDATE_ACCOUNT_PREPARE = "UPDATE Accounts SET user_name = $1::text, password = $2::text, old_password = $3::text, " 
 //											"url = $4::text, update_time = $5::bigint, deleted = $6::boolean WHERE account_UUID = $7::text "   
@@ -78,9 +86,13 @@ private:
 //	const char *update_account_pre = "update_account_pre";
 	const char *upsert_account_pre = "upsert_account_pre";
 	
+	
 	void createPreparedStatements();
 	bool prepare(const char *prep_name, const std::string &prep_def, int count);
 	bool connect();
+	bool reset_connection();
+	bool PQexecPrepared_wrapper(const char *pre, const char *args[], int argc);
+	bool PQexec_wrapper(const char *sql);
 	
 public:
 	data_store_connection();

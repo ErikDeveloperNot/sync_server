@@ -9,7 +9,8 @@
 #include <map>
 #include <cstring>
 
-
+//remove later
+#include <iostream>
 
 
 sync_handler::sync_handler(const std::string &thread_id, Config *config, 
@@ -93,12 +94,13 @@ std::string sync_handler::handle_register(std::string& request)
 	
 	//lock and check for account
 	user_infos_lock.lock();
+	long long current_t = current_time_ms();
 //debug_user_infos();	
 	
 	if (user_infos.count(registerConfigReq.email) < 1) {
 		//create the account
 		User user{registerConfigReq.email, hashedPassword, 1L};
-		User_info userInfo{user, current_time_ms()};
+		User_info userInfo{user, current_t};
 		user_infos[user.account_uuid] = userInfo;
 		user_infos_lock.unlock();
 		user_infos_cv.notify_one();
@@ -113,7 +115,7 @@ std::string sync_handler::handle_register(std::string& request)
 			throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 		} else {
 			// unlock user
-			unlock_user(user.account_uuid);
+			unlock_user(user.account_uuid, current_t);
 		}
 	} else {
 		//user already exist return
@@ -156,16 +158,16 @@ std::string sync_handler::handle_delete(std::string& request)
 		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
 	}
 
-	lock_user(registerConfigReq.email);
+	long long current_t = lock_user(registerConfigReq.email);
 	
 	if (!verify_password(registerConfigReq.email, registerConfigReq.password)) {
-		unlock_user(registerConfigReq.email);
+		unlock_user(registerConfigReq.email, current_t);
 		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
 	if (!store.delete_user(user_infos[registerConfigReq.email].user)) {
 		printf("Error deleting account %s from the database\n", registerConfigReq.email.c_str());
-		unlock_user(registerConfigReq.email);
+		unlock_user(registerConfigReq.email, current_t);
 		throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 	}
 	
@@ -195,7 +197,7 @@ std::string sync_handler::handle_sync_initial(std::string& request)
 	syncResp.responseCode = 0; //TODO TODO -  check on this
 	
 	if (!verify_password(syncReq.registerConfigReq.email, syncReq.registerConfigReq.password)) {
-		unlock_user(syncReq.registerConfigReq.email);
+		unlock_user(syncReq.registerConfigReq.email, syncResp.lockTime);
 		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
@@ -246,7 +248,7 @@ std::string sync_handler::handle_sync_final(std::string& request)
 	}
 	
 	if (!verify_password(syncFinal.user, syncFinal.password)) {
-		unlock_user(syncFinal.user);
+		unlock_user(syncFinal.user, syncFinal.lockTime);
 		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
@@ -256,20 +258,20 @@ std::string sync_handler::handle_sync_final(std::string& request)
 	if (store.upsert_accounts_for_user(syncFinal.user, syncFinal.accounts)) {
 		if (!store.update_last_sync_for_user(syncFinal.user, relockTime)) {
 			printf("Failed to update last SyncTime for user: %s in syncFinal\n", syncFinal.user.c_str());
-			unlock_user(syncFinal.user);
+			unlock_user(syncFinal.user, relockTime);
 //			throw register_server_exception{STATUS_500_SERVER_ERROR};
 			throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 		}
 	} else {
 		//means there was at least 1 failure, so dont update last sync time so another sync can be done
 		printf("Failed to update accounts for user: %s in syncFinal\n", syncFinal.user.c_str());
-		unlock_user(syncFinal.user);
+		unlock_user(syncFinal.user, relockTime);
 //		throw register_server_exception{STATUS_500_SERVER_ERROR};
 		throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 	}
 	
 	//unlock user
-	unlock_user(syncFinal.user);
+	unlock_user(syncFinal.user, relockTime);
 	
 	return "{ msg : \"Sync Final Complete\" }";
 }
@@ -282,48 +284,114 @@ long long sync_handler::current_time_ms()
 }
 
 
-long long sync_handler::lock_user(std::string& forUser)
+long sync_handler::current_time_sec()
+{
+	return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+
+long sync_handler::lock_user(std::string& forUser)
 {
 	std::unique_lock<std::mutex> lock(user_infos_lock);
 	
 	if (user_infos.count(forUser) < 1) {
 		lock.unlock();
 		user_infos_cv.notify_one();
-
-//		throw register_server_exception{STATUS_401};
 		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
-	long long current_lock = current_time_ms();
-//printf("######### %lld : %lld : %lld\n", current_lock, user_infos[forUser].lock_time, LOCK_TIMEOUT);
-	if (current_lock - user_infos[forUser].lock_time < LOCK_TIMEOUT) {
+	if (!user_infos[forUser].cv_vector.empty()) {
 		printf("%s - waiting for lock for user: %s\n", t_id.c_str(), forUser.c_str());
-//		auto sec = std::chrono::seconds((current_lock - user_infos[forUser].lock_time) / 50); //1000 + 1);
-		auto milliSec = std::chrono::milliseconds(200);
+		auto sec = std::chrono::seconds(30);
 		
-		while (!user_infos_cv.wait_for(lock, milliSec, [&]() {
-			current_lock = current_time_ms();
-			printf("%s - check if \(%lld - %lld = %lld\) > %lld\n", t_id.c_str(), current_lock, user_infos[forUser].lock_time,
-					(current_lock - user_infos[forUser].lock_time), LOCK_TIMEOUT);
-			return (current_lock - user_infos[forUser].lock_time > LOCK_TIMEOUT);
-		})) {}
+		// add hndler/thread cond variable to user queue, release user_info_lock and wait on cv. TODO - add timeout later
+		std::unique_lock<std::mutex> temp_lock(handler_mutex);
+		user_infos[forUser].cv_vector.push_back(&handler_cv);
+		lock.unlock();
+		user_infos_cv.notify_one();
+		
+//		while (!handler_cv.wait(temp_lock, [&]() {
+//			lock.lock();
+//			
+//			if (user_infos[forUser].cv_vector[0] != &handler_cv) {
+//				lock.unlock();
+//				user_infos_cv.notify_one();
+//				return false;
+//			} else {
+//				return true;
+//			}
+//		})) {}
 
-//		user_infos_cv.wait(lock, [&]() {
-//			current_lock = current_time_ms();
-//			printf("%s - check if \(%lld - %lld = %lld\) > %lld\n", t_id.c_str(), current_lock, user_infos[forUser].lock_time,
-//					(current_lock - user_infos[forUser].lock_time, LOCK_TIMEOUT));
-//			return (current_lock - user_infos[forUser].lock_time > LOCK_TIMEOUT);
-//		});
+		handler_cv.wait(temp_lock);
+		printf("%s - notified waiting for %s\n", t_id.c_str(), forUser.c_str());
+		lock.lock();
 		
-		//if still locked throw 503
-		current_lock = current_time_ms();
-		if (current_lock - user_infos[forUser].lock_time < LOCK_TIMEOUT) {
+		//should never see this
+		if (user_infos[forUser].cv_vector[0] != &handler_cv) {
+			printf("%s - %s notified but wrong cv is in front\n", t_id.c_str(), forUser.c_str());
+			
+			std::vector<std::condition_variable *>::iterator it = user_infos[forUser].cv_vector.begin();
+			for (it; it != user_infos[forUser].cv_vector.end(); it++)
+				if (*it == &handler_cv)
+					break;
+					
+			if (it != user_infos[forUser].cv_vector.end())
+				user_infos[forUser].cv_vector.erase(it);
+			
 			lock.unlock();
 			user_infos_cv.notify_one();
-//			throw register_server_exception{STATUS_503.c_str()};
-			throw register_server_exception{configHttp.build_reply(HTTP_503, close_con)};
+			
+			throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 		}
+
+//		if (handler_cv.wait_for(temp_lock, sec) == std::cv_status::timeout) {
+//			printf("%s - timed out waiting for lock for user: %s\n", t_id.c_str(), forUser.c_str());
+//			throw register_server_exception{configHttp.build_reply(HTTP_503, close_con)};
+//		}
+	} else {
+		user_infos[forUser].cv_vector.push_back(&handler_cv);
 	}
+
+
+
+	long current_lock = current_time_sec();
+
+//printf("######### %lld : %lld : %lld\n", current_lock, user_infos[forUser].lock_time, LOCK_TIMEOUT);
+//	if (current_lock - user_infos[forUser].lock_time < LOCK_TIMEOUT) {
+//		printf("%s - waiting for lock for user: %s\n", t_id.c_str(), forUser.c_str());
+//		auto sec = std::chrono::seconds(30);
+//		auto milliSec = std::chrono::milliseconds(200);
+//		
+//		while (!user_infos_cv.wait_for(lock, milliSec, [&]() {
+//			current_lock = current_time_ms();
+//			printf("%s - check if \(%lld - %lld = %lld\) > %lld\n", t_id.c_str(), current_lock, user_infos[forUser].lock_time,
+//					(current_lock - user_infos[forUser].lock_time), LOCK_TIMEOUT);
+//			return (current_lock - user_infos[forUser].lock_time > LOCK_TIMEOUT);
+//		})) {}
+
+		// add hndler/thread cond variable to user queue, release user_info_lock and wait on cv. TODO - add timeout later
+//		std::unique_lock<std::mutex> temp_lock(handler_mutex);
+////		user_infos[forUser].cv_queue.push(&handler_cv);
+//		lock.unlock();
+//		user_infos_cv.notify_one();
+//		
+//		if (handler_cv.wait_for(temp_lock, sec) == std::cv_status::timeout) {
+//			printf("%s - timed out waiting for lock for user: %s\n", t_id.c_str(), forUser.c_str());
+//			throw register_server_exception{configHttp.build_reply(HTTP_503, close_con)};
+//		}
+//
+//		printf("%s - got lock for user %s\n", t_id.c_str(), forUser.c_str());
+//		lock.lock();
+		
+		//if still locked throw 503
+//		current_lock = current_time_ms();
+//		if (current_lock - user_infos[forUser].lock_time < LOCK_TIMEOUT) {
+//			lock.unlock();
+//			user_infos_cv.notify_one();
+////			throw register_server_exception{STATUS_503.c_str()};
+//			throw register_server_exception{configHttp.build_reply(HTTP_503, close_con)};
+//		}
+//	}
 	
 	user_infos[forUser].lock_time = current_lock;
 	lock.unlock();
@@ -333,9 +401,9 @@ long long sync_handler::lock_user(std::string& forUser)
 }
 
 
-long long sync_handler::relock_user(std::string& forUser, long long userLock)
+long sync_handler::relock_user(std::string& forUser, long userLock)
 {
-	long long toReturn{0};
+	long toReturn{0};
 	std::unique_lock<std::mutex> lock(user_infos_lock);
 	
 	if (user_infos.count(forUser) < 1) {
@@ -347,10 +415,10 @@ long long sync_handler::relock_user(std::string& forUser, long long userLock)
 	}
 	
 	if (userLock != user_infos[forUser].lock_time) {
-		//slow client fail
+		//slow client or server, fail
 		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	} else {
-		toReturn = current_time_ms();
+		toReturn = current_time_sec();
 		user_infos[forUser].lock_time = toReturn;
 	}
 	
@@ -361,10 +429,38 @@ long long sync_handler::relock_user(std::string& forUser, long long userLock)
 }
 
 
-void sync_handler::unlock_user(std::string& forUser)
+void sync_handler::unlock_user(std::string& forUser, long lockTime)
 {
 	user_infos_lock.lock();
-	user_infos[forUser].lock_time = 0;
+//	user_infos[forUser].lock_time = 0;
+	
+	if (lockTime != user_infos[forUser].lock_time) {
+		printf("%s - Tried to unlock for user: %s, but locktimes dont match\n", t_id.c_str(), forUser.c_str());
+	} else {
+		user_infos[forUser].lock_time = 0;
+	
+	
+//	std::vector<std::condition_variable *>::iterator it = user_infos[forUser].cv_vector.begin();
+	
+//	for (it; it != user_infos[forUser].cv_vector.end(); it++) {
+//std::cout << "*it: " << *it << ", &handler_cv: " << &handler_cv << std::endl;
+//std::cout << "&it: " << &it << ", &handler_cv: " << &handler_cv << std::endl;
+//		if (*it == &handler_cv)
+//			break;
+//		
+//	}
+//					
+//	if (it != user_infos[forUser].cv_vector.end())
+//		user_infos[forUser].cv_vector.erase(it);
+		
+		if (!user_infos[forUser].cv_vector.empty()) {
+			user_infos[forUser].cv_vector.erase(user_infos[forUser].cv_vector.begin());
+			
+			if (!user_infos[forUser].cv_vector.empty()) 
+				user_infos[forUser].cv_vector[0]->notify_one();
+		}
+	}
+	
 	user_infos_lock.unlock();
 	user_infos_cv.notify_one();
 }

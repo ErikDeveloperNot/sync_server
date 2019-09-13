@@ -6,6 +6,7 @@
 #include <iostream>
 #include <atomic>
 #include <string>
+#include <sstream>
 #include <string.h>
 
 #include <sys/types.h>
@@ -54,10 +55,10 @@
 
 
 
-void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
-					 SSL_CTX *ctx, const int id, std::atomic_int &connections, Config *config, 
-					 std::map<std::string, User_info> &, fd_set &, std::map<int, conn_meta> &,
-					 std::mutex &fd_set_mutex, int);
+//void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
+//					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
+//					 std::map<std::string, User_info> &, fd_set &, std::map<int, conn_meta> &,
+//					 std::mutex &fd_set_mutex, int);
 					 
 
 
@@ -81,27 +82,31 @@ server::server(Config *conf)
 	printf("Server fd: %d, max connections: %d\n", listen_sd, max_connections);
 	printf("control read fd: %d\n", control[0]);
 	printf("control write fd: %d\n", control[1]);
+	
+	current_thread_count = 0;
 
 	for (int i{1}; i<=config->getServiceThreads(); i++) {
-		std::thread t{service_thread, std::ref(service_q), std::ref(service_mutex), 
-						std::ref(cv), ctx, i, std::ref(current_connections), config, std::ref(infos),
-						std::ref(connection_fds), std::ref(conn_map), std::ref(connection_fds_mutex),
-						control[1]};
-
-		service_threads.push_back(std::move(t));
-		printf("Thread: %d, started\n", i);
+		start_service_thread();
 	}
+	
+	start_service_thread_manager();
+	
+	if (config->isServerUseKeepAliveCleaner())
+		start_client_seesion_manager();
 }
 
 
 void server::start()
 {
-	struct timeval tv;
-	tv.tv_sec = config->getServerKeepAlive();
-	tv.tv_usec = 0;
-	int keep_alive = config->getServerKeepAlive();
-	bool use_keep_alive = config->isServerUseKeepAliveCleaner();
-	
+//	struct timeval tv;
+//	int keep_alive_secs = config->getServerKeepAlive();
+//	tv.tv_sec = keep_alive_secs;
+//	tv.tv_usec = 0;
+//	int keep_alive = config->getServerKeepAlive();
+//	bool use_keep_alive = config->isServerUseKeepAliveCleaner();
+//	last_thread_check = current_time_sec();
+//	thread_check_counter = 0;
+		
 		while (true) {
 connection_fds_mutex.lock();
 		read_fds = connection_fds;
@@ -110,12 +115,17 @@ connection_fds_mutex.unlock();
 
 //		printf("Entering SELECT\n");
 		
-		if (use_keep_alive)
-			rv = select(max_fd+1, &read_fds, NULL, NULL, &tv);
-		else
+//		if (use_keep_alive) {
+//			tv.tv_sec = keep_alive_secs;
+//			tv.tv_usec = 0;
+//			rv = select(max_fd+1, &read_fds, NULL, NULL, &tv);
+//		} else {
 			rv = select(max_fd+1, &read_fds, NULL, NULL, NULL);
+//		}
+		
 			
-//		printf("SELECT returned: %d\n", rv);
+		printf("SELECT returned: %d\n", rv);
+printf("queue size: %d\n", service_q.size());
 
 		if (rv < 0) {
 			//error
@@ -124,17 +134,8 @@ connection_fds_mutex.unlock();
 			
 		} else if (rv == 0) {
 			// clean old sessions if enabled
-			long long now = current_time_ms();
-			
-			for (int i{0}; i <=max_fd; i++) {
-				if (conn_map.count(i) > 0) {
-					if (now - conn_map[i].last_used > keep_alive && !conn_map[i].active) {
-						close_client(i, conn_map[i].ssl, connection_fds, connection_fds_mutex);
-						current_connections--;
-						conn_map.erase(i);
-					}
-				}
-			}
+//			close_old_connections();
+//			check_threads();
 		} else {
 			printf("max_fd = %d\n", max_fd);
 			if (FD_ISSET(control[0], &read_fds)) {
@@ -167,10 +168,11 @@ connection_fds_mutex.unlock();
 				if (client > max_fd)
 					max_fd = client;
 						
-				conn_map[client] = conn_meta(client, NULL, current_time_ms(), true);   //revisit time if I use this field
+				conn_map[client] = conn_meta(client, NULL, current_time_sec(), true);   //revisit time if I use this field
 				current_connections++;
-				std::lock_guard<std::mutex> lg{service_mutex};
+				service_mutex.lock();
 				service_q.push(&(conn_map[client]));
+				service_mutex.unlock();
 				cv.notify_one();
 			
 				served++;
@@ -197,15 +199,6 @@ connection_fds_mutex.unlock();
 					ioctl(i, FIONREAD, &n);
 						
 					if (n == 0) {
-//						printf("closing client\n");
-//connection_fds_mutex.lock();
-//						FD_CLR(i, &connection_fds);
-//connection_fds_mutex.unlock();
-//
-//						SSL_free(conn_map[i].ssl);         /* release SSL state */
-//						close(i);
-//						printf("should be closed\n");
-
 						close_client(i, conn_map[i].ssl, connection_fds, connection_fds_mutex);
 						current_connections--;
 						conn_map.erase(i);
@@ -223,7 +216,7 @@ connection_fds_mutex.unlock();
 					} else {
 						printf("ERRRRRRROOOOORRRR - dont think i should see\n");
 					}
-				} else {
+				} /*else {
 					// clean old sessions if enabled
 					if (use_keep_alive) {
 						if (conn_map.count(i) > 0) {
@@ -234,7 +227,7 @@ connection_fds_mutex.unlock();
 							}
 						}
 					}
-				}
+				}*/
 //				std::this_thread::sleep_for(std::chrono::milliseconds(200));
 			}
 		}
@@ -310,7 +303,7 @@ int server::startListener(Config *config)
 		abort();
     }
     
-	if ( listen(sd, 10) != 0 )
+	if ( listen(sd, config->getServerTcpBackLog()) != 0 )
     {
 		perror("Can't configure listening port");
 		abort();
@@ -353,9 +346,44 @@ void server::close_client(int fd, SSL *ssl, fd_set & connections_fd, std::mutex 
 }
 
 
+void server::start_client_seesion_manager()
+{
+	printf("Starting client session manager thread\n");
+	
+	std::thread manager([&]() {
+		
+	});
+	
+	manager.detach();
+}
+
+
 long long server::current_time_ms()
 {
 	return std::chrono::system_clock::now().time_since_epoch().count()/1000;
+}
+
+
+long server::current_time_sec()
+{
+	return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+
+void server::close_old_connections()
+{
+	long now = current_time_sec();
+	int keep_alive = config->getServerKeepAlive();
+			
+//	for (int i{0}; i <=max_fd; i++) {
+//		if (conn_map.count(i) > 0) {
+//			if (now - conn_map[i].last_used > keep_alive && !conn_map[i].active) {
+//				close_client(i, conn_map[i].ssl, connection_fds, connection_fds_mutex);
+//				current_connections--;
+//				conn_map.erase(i);
+//			}
+//		}
+//	}
 }
 
 
@@ -363,18 +391,26 @@ void server::shutdown(bool immdeiate)
 {
 	if (!immdeiate) {
 		printf("Server shutting down, waiting for threads to complete\n");
-		conn_meta c {-1, nullptr, END_IT, false};
 			
-		for (size_t i{0}; i<config->getServiceThreads(); i++) {
+		for (size_t i{0}; i < current_thread_count; i++) {
 			std::lock_guard<std::mutex> lg{service_mutex};
-			service_q.push(&c); 
+			service_q.push(&shut_thread_down_meta); 
 			cv.notify_one();
 		}
 	
-		for (size_t i{0}; i<config->getServiceThreads(); i++) {
-			printf("Waiting for thread: %d\n", i+1);
-			service_threads[i].join();
+		while (true) {
+			service_mutex.lock();
+			
+			if (service_q.size() > 0) {
+				service_mutex.unlock();
+				cv.notify_one();
+				std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+			} else {
+				std::this_thread::sleep_for(std::chrono::milliseconds(500));
+				break;
+			}
 		}
+
 	}
 	
 	
@@ -382,6 +418,90 @@ void server::shutdown(bool immdeiate)
 }
 
 
+void server::start_service_thread()
+{
+//	current_thread_count = thread_id;
+	current_thread_count++;
+	
+	std::thread t{service_thread, std::ref(service_q), std::ref(service_mutex), 
+						std::ref(cv), ctx, std::ref(current_connections), config, std::ref(infos),
+						std::ref(connection_fds), std::ref(conn_map), std::ref(connection_fds_mutex),
+						control[1]};
+	
+//	service_threads.push_back(std::move(t));
+		
+//	if (extra)
+//		printf("Adding temporary Thread: %d, started\n", thread_id);
+//	else
+		printf("Thread: %d, started, current thread count: %d\n", t.get_id(), current_thread_count);
+		t.detach();
+}
+
+
+void server::start_service_thread_manager()
+{
+	// TODO - revisit, instead use a circular int array to keep track of q size, 
+	std::thread manager([&]() {
+		int server_threads = config->getServiceThreads();
+		int prior_q_sz{0};
+		int thread_check_counter{0};
+		long last_thread_removal = current_time_sec();
+		
+		while (true) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(50));
+			long now = current_time_sec();
+			int current_q_sz = service_q.size();
+if (current_q_sz > 10)
+printf("thread manager:: current q sz:%d, prior: %d, thread_check_counter:%d\n", current_q_sz, prior_q_sz, thread_check_counter);
+			if (current_q_sz < 1) {
+//				if (--thread_check_counter < 0)
+					thread_check_counter = 0;
+					
+				if (current_thread_count > server_threads && now - last_thread_removal > 120) {
+					int to_shutdown = (current_thread_count - server_threads) / 2;
+					
+					if (to_shutdown > 0) {
+						for (int i{0}; i<to_shutdown; i++) {
+							printf("Shutting down a thread, current thread count: %d\n", --current_thread_count);
+							service_mutex.lock();
+							service_q.push(&shut_thread_down_meta); 
+							service_mutex.unlock();
+							cv.notify_one();
+						}
+					}
+					
+					last_thread_removal = now;
+				}
+			} else if (current_q_sz > current_thread_count/1.5 ||
+						(current_q_sz >= prior_q_sz && current_q_sz > 0)) {
+				if (++thread_check_counter >= 3) {
+					thread_check_counter = 3;
+					
+					for (size_t j{0}; j < current_q_sz/2; j++) {
+						start_service_thread();
+						
+						if (current_thread_count >= server_threads)
+							break;
+					}
+				}
+			} else {
+				if (--thread_check_counter < 0)
+					thread_check_counter = 0;
+			}
+			
+			prior_q_sz = current_q_sz;
+		}
+	});
+		
+	manager.detach();
+}
+
+
+/*
+ *  
+ * Service Threads Area Below
+ * 
+ */
 
 // functions used by service thread
 bool verify_request(std::string &method, std::string &operation);
@@ -390,13 +510,18 @@ bool parse_header(std::string &header, std::string &operation, std::string &cont
 
 // definition of service thread-
 void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
-					 SSL_CTX *ctx, const int id, std::atomic_int &connections, Config *config, 
+					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
 					 std::map<std::string, User_info> & infos, fd_set & connections_fd, 
 					 std::map<int, conn_meta> & conn_map, std::mutex &connections_fd_mutex,
 					 int control)
 {
+	std::thread::id id = std::this_thread::get_id();
+	std::stringstream ss;
+	ss << id;
+	std::string id_str = ss.str();
+	
 	std::string t{"service_thread_"};
-	t += std::to_string(id);
+	t += id_str;
 	const char *t_id = t.c_str();
 	
 	sync_handler handler{t, config, infos};
@@ -406,6 +531,7 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 	conn_meta *client;
 	char control_buf[1];
 	
+//	auto sec = std::chrono::seconds(30);
 	
 	while (true) {
 //		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
@@ -413,6 +539,23 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 		{
 			std::unique_lock<std::mutex> lock{q_mutex};
 			
+//			if (!extra) {
+//				cv.wait(lock, [&] {
+//					return q.size() > 0;
+//				});
+//			} else { 
+//				cv.wait_for(lock, sec, [&] {
+//					return (q.size() > 0 || running == 0);
+//				});
+//				
+//				if (running == 0) {
+//					printf("Thread %s shutting down\n", t_id);
+//					break;
+//				}
+//					
+//			}
+
+if (q.size() < 1)
 			cv.wait(lock, [&] {
 				return q.size() > 0;
 			});
@@ -503,10 +646,10 @@ printf("New SSL session needed\n");
 		}
 
 printf(">> Adding client %d back to connections_fd\n", client->socket);
+		client->last_used = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+		client->active = false;
 connections_fd_mutex.lock();
 		FD_SET(client->socket, &connections_fd);
-		client->last_used = std::chrono::system_clock::now().time_since_epoch().count()/1000;
-		client->active = false;
 connections_fd_mutex.unlock();
 		write(control, control_buf, 1);
 		
@@ -601,4 +744,3 @@ bool parse_header(std::string &header, std::string &operation, std::string &cont
 	
 	return true;
 }
-

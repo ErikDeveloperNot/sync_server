@@ -2,6 +2,8 @@
 #define _CONFIG_H_
 
 #include <string>
+#include <vector>
+#include <condition_variable>
 
 //network defaults
 #define SERVER_BIND "ALL"
@@ -13,6 +15,10 @@
 #define SERVER_MAX_CONNECTIONS 200
 #define SERVER_KEEP_ALIVE 30
 #define SERVER_USE_KEEP_ALIVE_CLEANER false
+#define SERVER_TCP_BACK_LOG 100
+#define SERVER_START_THREAD_COUNT 25
+
+#define MAX_ACCOUNT_PENDING_OPS 3
 
 //database defaults
 #define DB_SERVER "localhost"
@@ -51,6 +57,7 @@ struct User_info
 {
 	User user;
 	long long lock_time;
+	std::vector<std::condition_variable *> cv_vector;
 	
 	User_info() {}
 	User_info(User user, long long lock_time) :
@@ -72,12 +79,16 @@ private:
 	std::string bind_address = SERVER_BIND;
 	int bind_port = SERVER_PORT;
 	int service_threads = SERVICE_THREADS;
+	int max_service_threads = SERVICE_THREADS;
 	bool ssl = SERVER_USE_SSL;
 	std::string server_cert = SERVER_CERT;
 	std::string server_key = SERVER_KEY;
 	int server_max_connections = SERVER_MAX_CONNECTIONS;
 	int server_keep_alive = SERVER_KEEP_ALIVE;
 	bool server_use_keep_alive_cleaner = SERVER_USE_KEEP_ALIVE_CLEANER;
+	int server_tcp_back_log = SERVER_TCP_BACK_LOG;
+	
+	int max_account_pending_ops = MAX_ACCOUNT_PENDING_OPS;
 	
 	std::string db_server = DB_SERVER;
 	std::string db_port = DB_PORT;
@@ -109,10 +120,13 @@ public:
 	void setServerCert(const std::string& server_cert) {this->server_cert = server_cert;}
 	void setServerKey(const std::string& server_key) {this->server_key = server_key;}
 	void setServiceThreads(int service_threads) {this->service_threads = service_threads;}
+	void setMaxServiceThreads(int service_threads) {this->max_service_threads = service_threads;}
 	void setSsl(bool ssl) {this->ssl = ssl;}
 	void setServerMaxConnections(int server_max_connections) {this->server_max_connections = server_max_connections;}
 	void setServerKeepAlive(int server_keep_alive) {this->server_keep_alive = server_keep_alive;}
 	void setServerUseKeepAliveCleaner(bool server_use_keep_alive_cleaner) {this->server_use_keep_alive_cleaner = server_use_keep_alive_cleaner;}
+	void setServerTcpBackLog(int server_tcp_back_log) {this->server_tcp_back_log = server_tcp_back_log;}
+	void setMaxAccountPendingOps(int max_account_pending_ops) {this->max_account_pending_ops = max_account_pending_ops;}
 	
 	bool isSsl() const {return ssl;}
 	const std::string& getBindAddress() const {return bind_address;}
@@ -128,9 +142,12 @@ public:
 	const std::string& getServerCert() const {return server_cert;}
 	const std::string& getServerKey() const {return server_key;}
 	int getServiceThreads() const {return service_threads;}
+	int getMaxServiceThreads() const {return max_service_threads;}
 	int getServerMaxConnections() const {return server_max_connections;}
 	int getServerKeepAlive() const {return server_keep_alive;}
 	bool isServerUseKeepAliveCleaner() const {return server_use_keep_alive_cleaner;}
+	int getMaxAccountPendingOps() const {return max_account_pending_ops;}
+	int getServerTcpBackLog() const {return server_tcp_back_log;}
 	
 };
 

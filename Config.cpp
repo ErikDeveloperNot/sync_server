@@ -49,6 +49,8 @@ void Config::setKeyValue(char* key, char* value)
 		bind_port = atoi(value);
 	} else if (strcmp(key, "service_threads") == 0) {
 		service_threads = atoi(value);
+	} else if (strcmp(key, "max_service_threads") == 0) {
+		max_service_threads = atoi(value);
 	} else if (strcmp(key, "ssl") == 0) {
 		ssl = (strcmp(value, "true") == 0) ? true: false;
 	} else if (strcmp(key, "server_cert") == 0) {
@@ -77,6 +79,10 @@ void Config::setKeyValue(char* key, char* value)
 		server_keep_alive = atoi(value);
 	} else if (strcmp(key, "server_use_keep_alive_cleaner") == 0) {
 		server_use_keep_alive_cleaner = (strcmp(value, "true") == 0) ? true: false;
+	} else if (strcmp(key, "server_tcp_back_log") == 0) {
+		server_tcp_back_log = atoi(value);
+	} else if (strcmp(key, "max_account_pending_ops") == 0) {
+		max_account_pending_ops = atoi(value);
 	}
 }
 
@@ -87,12 +93,15 @@ void Config::debugValues()
 	std::cout << "bind address: " << bind_address << std::endl;
 	std::cout << "bind port: " << bind_port << std::endl;
 	std::cout << "service threads: " << service_threads << std::endl;
+	std::cout << "max service threads: " << max_service_threads << std::endl;
 	std::cout << "ssl: " << ssl << std::endl;
 	std::cout << "server cert: " << server_cert << std::endl;
 	std::cout << "server key" << server_key << std::endl;
 	std::cout << "server max connections: " << server_max_connections << std::endl;
 	std::cout << "server use keep alive: " << server_use_keep_alive_cleaner << std::endl;
 	std::cout << "server keep alive: " << server_keep_alive << std::endl;
+	std::cout << "server tcp backlog: " << server_tcp_back_log << std::endl;
+	std::cout << "Account max pending operations count: " << max_account_pending_ops << std::endl;
 	std::cout << "db server: " << db_server << std::endl;
 	std::cout << "db port: " << db_port << std::endl;
 	std::cout << "db user: " << db_username << std::endl;

@@ -25,12 +25,13 @@ struct conn_meta
 {
 	int socket;
 	SSL *ssl;
-	long long last_used;
+	long last_used;
 	bool active;
 	
-	conn_meta(int s, SSL *_ssl, long long l, bool a) : socket{s}, ssl{_ssl}, last_used{l}, active{a} {}
+	conn_meta(int s, SSL *_ssl, long l, bool a) : socket{s}, ssl{_ssl}, last_used{l}, active{a} {}
 	conn_meta() = default;
 };
+
 
 
 class server
@@ -42,11 +43,13 @@ private:
 	config_http configHttp;
 	
 	// service thread variables
-	std::vector<std::thread> service_threads;
+	int current_thread_count;
+	std::atomic_int active_threads;
 	std::queue<conn_meta *> service_q;
 	std::mutex service_mutex;
 	std::condition_variable cv;
 	std::atomic_int current_connections;
+	conn_meta shut_thread_down_meta {-1, nullptr, END_IT, false};
 	
 	SSL_CTX *ctx;
 
@@ -68,15 +71,22 @@ private:
 	char control_buf[10];
 	FILE *control_file;
 	
-//	int control_keep_alive[2];
-//	char control_keep_alive_buf[10];
-//	FILE *control_keep_alive_file;
-	
+	// variables for file descriptor used by service threads
+	int control2[2];
+	char control2_buf[10];
+	FILE *control2_file;
+	std::vector<int> clients_to_close;
+	std::mutex clients_to_close_mux;
 	
 	int startListener(Config *config);
 	void handleServerBusy(int);
 	void close_client(int, SSL *, fd_set &, std::mutex &);
+	void close_clients(std::vector<int> clients);
 	long long current_time_ms();
+	long current_time_sec();
+	void start_service_thread();
+	void start_service_thread_manager();
+	void start_client_seesion_manager();
 
 public:
 	server(Config *config);
@@ -85,5 +95,13 @@ public:
 	void start();
 	void shutdown(bool immdeiate);
 };
+
+
+void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
+					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
+					 std::map<std::string, User_info> &, fd_set &, std::map<int, conn_meta> &,
+					 std::mutex &fd_set_mutex, int, std::atomic_int &active_threads);
+
+
 
 #endif // _SERVER_H_

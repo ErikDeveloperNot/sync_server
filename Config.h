@@ -79,6 +79,7 @@ private:
 	std::string bind_address = SERVER_BIND;
 	int bind_port = SERVER_PORT;
 	int service_threads = SERVICE_THREADS;
+	int max_service_threads = SERVICE_THREADS;
 	bool ssl = SERVER_USE_SSL;
 	std::string server_cert = SERVER_CERT;
 	std::string server_key = SERVER_KEY;
@@ -119,6 +120,7 @@ public:
 	void setServerCert(const std::string& server_cert) {this->server_cert = server_cert;}
 	void setServerKey(const std::string& server_key) {this->server_key = server_key;}
 	void setServiceThreads(int service_threads) {this->service_threads = service_threads;}
+	void setMaxServiceThreads(int service_threads) {this->max_service_threads = service_threads;}
 	void setSsl(bool ssl) {this->ssl = ssl;}
 	void setServerMaxConnections(int server_max_connections) {this->server_max_connections = server_max_connections;}
 	void setServerKeepAlive(int server_keep_alive) {this->server_keep_alive = server_keep_alive;}
@@ -140,6 +142,7 @@ public:
 	const std::string& getServerCert() const {return server_cert;}
 	const std::string& getServerKey() const {return server_key;}
 	int getServiceThreads() const {return service_threads;}
+	int getMaxServiceThreads() const {return max_service_threads;}
 	int getServerMaxConnections() const {return server_max_connections;}
 	int getServerKeepAlive() const {return server_keep_alive;}
 	bool isServerUseKeepAliveCleaner() const {return server_use_keep_alive_cleaner;}

@@ -92,15 +92,17 @@ std::string sync_handler::handle_register(std::string& request)
 				registerConfigReq.password.c_str());
 	}
 	
+	long long current_t = current_time_ms();
+	//create the account
+	User user{registerConfigReq.email, hashedPassword, 1L};
+	User_info userInfo{user, current_t};
+		
 	//lock and check for account
 	user_infos_lock.lock();
-	long long current_t = current_time_ms();
+	
 //debug_user_infos();	
 	
 	if (user_infos.count(registerConfigReq.email) < 1) {
-		//create the account
-		User user{registerConfigReq.email, hashedPassword, 1L};
-		User_info userInfo{user, current_t};
 		user_infos[user.account_uuid] = userInfo;
 		user_infos_lock.unlock();
 		user_infos_cv.notify_one();
@@ -113,10 +115,10 @@ std::string sync_handler::handle_register(std::string& request)
 			user_infos_cv.notify_one();
 //			throw register_server_exception{STATUS_500_SERVER_ERROR};
 			throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
-		} else {
+		} /*else {
 			// unlock user
 			unlock_user(user.account_uuid, current_t);
-		}
+		}*/
 	} else {
 		//user already exist return
 		user_infos_lock.unlock();
@@ -158,16 +160,16 @@ std::string sync_handler::handle_delete(std::string& request)
 		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
 	}
 
-	long long current_t = lock_user(registerConfigReq.email);
+//	long long current_t = lock_user(registerConfigReq.email);
 	
 	if (!verify_password(registerConfigReq.email, registerConfigReq.password)) {
-		unlock_user(registerConfigReq.email, current_t);
+//		unlock_user(registerConfigReq.email, current_t);
 		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
 	if (!store.delete_user(user_infos[registerConfigReq.email].user)) {
 		printf("Error deleting account %s from the database\n", registerConfigReq.email.c_str());
-		unlock_user(registerConfigReq.email, current_t);
+//		unlock_user(registerConfigReq.email, current_t);
 		throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 	}
 	
@@ -193,11 +195,14 @@ std::string sync_handler::handle_sync_initial(std::string& request)
 	}
 
 	sync_initial_response syncResp;
-	syncResp.lockTime = lock_user(syncReq.registerConfigReq.email);
+//	syncResp.lockTime = lock_user(syncReq.registerConfigReq.email);
+	
+	//still need to add the lockTime to the clients since they parse for it
+	syncResp.lockTime = current_time_sec();
 	syncResp.responseCode = 0; //TODO TODO -  check on this
 	
 	if (!verify_password(syncReq.registerConfigReq.email, syncReq.registerConfigReq.password)) {
-		unlock_user(syncReq.registerConfigReq.email, syncResp.lockTime);
+//		unlock_user(syncReq.registerConfigReq.email, syncResp.lockTime);
 		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
@@ -243,35 +248,33 @@ std::string sync_handler::handle_sync_final(std::string& request)
 	try {
 		syncFinal = parser.parse_sync_final(request);
 	} catch (json_parser_exception &ex) {
-//		throw register_server_exception{STATUS_400};
 		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
 	}
 	
 	if (!verify_password(syncFinal.user, syncFinal.password)) {
-		unlock_user(syncFinal.user, syncFinal.lockTime);
+//		unlock_user(syncFinal.user, syncFinal.lockTime);
 		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
-	long long relockTime = relock_user(syncFinal.user, syncFinal.lockTime);
+//	long long relockTime = relock_user(syncFinal.user, syncFinal.lockTime);
+	long long relockTime = current_time_sec();
 
 	//update store
 	if (store.upsert_accounts_for_user(syncFinal.user, syncFinal.accounts)) {
 		if (!store.update_last_sync_for_user(syncFinal.user, relockTime)) {
 			printf("Failed to update last SyncTime for user: %s in syncFinal\n", syncFinal.user.c_str());
-			unlock_user(syncFinal.user, relockTime);
-//			throw register_server_exception{STATUS_500_SERVER_ERROR};
+//			unlock_user(syncFinal.user, relockTime);
 			throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 		}
 	} else {
 		//means there was at least 1 failure, so dont update last sync time so another sync can be done
 		printf("Failed to update accounts for user: %s in syncFinal\n", syncFinal.user.c_str());
-		unlock_user(syncFinal.user, relockTime);
-//		throw register_server_exception{STATUS_500_SERVER_ERROR};
+//		unlock_user(syncFinal.user, relockTime);
 		throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 	}
 	
 	//unlock user
-	unlock_user(syncFinal.user, relockTime);
+//	unlock_user(syncFinal.user, relockTime);
 	
 	return "{ msg : \"Sync Final Complete\" }";
 }
@@ -290,6 +293,9 @@ long sync_handler::current_time_sec()
 }
 
 
+/*
+ *  deprecated -  no longer needed, instead use upsert with on conflict
+ */
 long sync_handler::lock_user(std::string& forUser)
 {
 	std::unique_lock<std::mutex> lock(user_infos_lock);
@@ -401,6 +407,9 @@ long sync_handler::lock_user(std::string& forUser)
 }
 
 
+/*
+ *  deprecated -  no longer needed, instead use upsert with on conflict
+ */
 long sync_handler::relock_user(std::string& forUser, long userLock)
 {
 	long toReturn{0};
@@ -428,7 +437,9 @@ long sync_handler::relock_user(std::string& forUser, long userLock)
 	return toReturn;
 }
 
-
+/*
+ *  deprecated -  no longer needed, instead use upsert with on conflict
+ */
 void sync_handler::unlock_user(std::string& forUser, long lockTime)
 {
 	user_infos_lock.lock();

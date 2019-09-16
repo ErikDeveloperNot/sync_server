@@ -4,7 +4,7 @@
 
 
 #define http_connection_close "Connection: close\r\n"
-#define http_connection_keep_alive "Connection: Keep-Alive\r\n"
+#define http_connection_keep_alive "Connection: keep-alive\r\n"
 #define http_content_type "Content-Type: application/json\r\n"
 #define http_content_length "Content-Length: "
 

@@ -45,7 +45,7 @@ private:
 	std::string handle_sync_initial(std::string &request);
 	std::string handle_sync_final(std::string &request);
 	
-	
+	// lock methods deprecated
 	long lock_user(std::string & forUser);
 	long relock_user(std::string & forUser, long lock);
 	void unlock_user(std::string & forUser, long lockTime);
@@ -58,7 +58,7 @@ public:
 	~sync_handler();
 
 	std::string handle_request(std::string &resource, std::string &request, request_type http_type);
-	
+//	bool handle_request(std::string &resource, std::string &request, request_type http_type, conn_meta * client);
 };
 
 #endif // _SYNC_HANDLER_H_

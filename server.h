@@ -43,11 +43,8 @@ private:
 	config_http configHttp;
 	
 	// service thread variables
-//	std::vector<std::thread> service_threads;
-//	std::vector<int> service_threads_running;
 	int current_thread_count;
-//	long last_thread_check;
-//	int thread_check_counter;
+	std::atomic_int active_threads;
 	std::queue<conn_meta *> service_q;
 	std::mutex service_mutex;
 	std::condition_variable cv;
@@ -74,17 +71,22 @@ private:
 	char control_buf[10];
 	FILE *control_file;
 	
+	// variables for file descriptor used by service threads
+	int control2[2];
+	char control2_buf[10];
+	FILE *control2_file;
+	std::vector<int> clients_to_close;
+	std::mutex clients_to_close_mux;
 	
 	int startListener(Config *config);
 	void handleServerBusy(int);
 	void close_client(int, SSL *, fd_set &, std::mutex &);
+	void close_clients(std::vector<int> clients);
 	long long current_time_ms();
 	long current_time_sec();
 	void start_service_thread();
 	void start_service_thread_manager();
-	void close_old_connections();
 	void start_client_seesion_manager();
-//	void check_threads();
 
 public:
 	server(Config *config);
@@ -98,7 +100,7 @@ public:
 void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
 					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
 					 std::map<std::string, User_info> &, fd_set &, std::map<int, conn_meta> &,
-					 std::mutex &fd_set_mutex, int);
+					 std::mutex &fd_set_mutex, int, std::atomic_int &active_threads);
 
 
 

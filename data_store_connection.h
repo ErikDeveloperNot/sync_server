@@ -47,18 +47,18 @@ static const std::string UPDATE_USER_LAST_SYNC_PREPARE = "UPDATE Users SET accou
 static const std::string GET_ACCOUNTS_FOR_USER_PREPARE = "SELECT * FROM accounts where account_uuid = $1::text";
 //static const std::string CREATE_ACCOUNT_PREPARE = "INSERT INTO Accounts VALUES ($1::text, $2::text, $3::text, $4::text, $5::text, "
 //													"$6::text, $7::bigint, $8::boolean)";
-static const std::string UPSERT_ACCOUNT_PREPARE = "INSERT INTO Accounts VALUES ($1::text, $2::text, $3::text, $4::text, $5::text, "
+static const std::string UPSERT_ACCOUNT_PREPARE = "INSERT INTO Accounts as a VALUES ($1::text, $2::text, $3::text, $4::text, $5::text, "
 													"$6::text, $7::bigint, $8::boolean) on conflict (account_name, account_uuid) DO UPDATE "
 													"SET user_name = EXCLUDED.user_name, password = EXCLUDED.password, old_password = "
 													"EXCLUDED.old_password, url = EXCLUDED.url, update_time = EXCLUDED.update_time, "
-													"deleted = EXCLUDED.deleted";
+													"deleted = EXCLUDED.deleted WHERE EXCLUDED.update_time > a.update_time";
 
 //testing
-static const std::string UPSERT_ACCOUNT_PREPARE_1 = "INSERT INTO Accounts VALUES ";
+static const std::string UPSERT_ACCOUNT_PREPARE_1 = "INSERT INTO Accounts as a VALUES ";
 static const std::string UPSERT_ACCOUNT_PREPARE_2 = "on conflict (account_name, account_uuid) DO UPDATE "
 													"SET user_name = EXCLUDED.user_name, password = EXCLUDED.password, old_password = "
 													"EXCLUDED.old_password, url = EXCLUDED.url, update_time = EXCLUDED.update_time, "
-													"deleted = EXCLUDED.deleted"; 
+													"deleted = EXCLUDED.deleted WHERE EXCLUDED.update_time > a.update_time"; 
 //end testing
 
 

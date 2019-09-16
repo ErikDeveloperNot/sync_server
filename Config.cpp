@@ -49,6 +49,8 @@ void Config::setKeyValue(char* key, char* value)
 		bind_port = atoi(value);
 	} else if (strcmp(key, "service_threads") == 0) {
 		service_threads = atoi(value);
+	} else if (strcmp(key, "max_service_threads") == 0) {
+		max_service_threads = atoi(value);
 	} else if (strcmp(key, "ssl") == 0) {
 		ssl = (strcmp(value, "true") == 0) ? true: false;
 	} else if (strcmp(key, "server_cert") == 0) {
@@ -91,6 +93,7 @@ void Config::debugValues()
 	std::cout << "bind address: " << bind_address << std::endl;
 	std::cout << "bind port: " << bind_port << std::endl;
 	std::cout << "service threads: " << service_threads << std::endl;
+	std::cout << "max service threads: " << max_service_threads << std::endl;
 	std::cout << "ssl: " << ssl << std::endl;
 	std::cout << "server cert: " << server_cert << std::endl;
 	std::cout << "server key" << server_key << std::endl;

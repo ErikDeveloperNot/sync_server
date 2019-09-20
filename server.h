@@ -12,8 +12,10 @@
 
 #include "openssl/ssl.h"
 #include "openssl/err.h"
+
 #include "config_http.h"
 #include "Config.h"
+#include "data_store_connection.h"
 
 #define END_IT -99
 #define STALE_TIMEOUT 30
@@ -55,6 +57,8 @@ private:
 
 	std::map<std::string, User_info> infos;
 	std::map<int, conn_meta> conn_map;
+	
+	data_store_connection store;
 	
 	// socket server variables
 	fd_set connection_fds;
@@ -100,7 +104,7 @@ public:
 void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
 					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
 					 std::map<std::string, User_info> &, fd_set &, std::map<int, conn_meta> &,
-					 std::mutex &fd_set_mutex, int, std::atomic_int &active_threads);
+					 std::mutex &fd_set_mutex, int, std::atomic_int &active_threads, data_store_connection &store);
 
 
 

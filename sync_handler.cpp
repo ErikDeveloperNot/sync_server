@@ -9,27 +9,14 @@
 #include <map>
 #include <cstring>
 
-//remove later
-#include <iostream>
-
 
 sync_handler::sync_handler(const std::string &thread_id, Config *config, 
-							std::map<std::string, User_info> &user_infos) :
+							std::map<std::string, User_info> &user_infos, data_store_connection &store) :
 t_id{thread_id},
 config{config},
-user_infos{user_infos}
+user_infos{user_infos},
+store{store}
 {
-	bool success{false};
-	
-	do {
-		success = store.initialize(t_id, config);
-		
-		if (!success) {
-			printf("%s: error initializing data store, will try again\n");
-			std::this_thread::sleep_for(std::chrono::milliseconds(20000));
-		}
-	} while (!success);
-	
 	std::call_once(onceFlag, [&]() {
 		printf("%s: initializing the user_infos set\n", t_id.c_str());
 		std::vector<User> users = store.getAllUsers();
@@ -39,9 +26,6 @@ user_infos{user_infos}
 		}
 		
 		debug_user_infos();
-//		for (auto &k : user_infos) {
-//			printf("%s, %d\n", k.first.c_str(), user_infos[k.first].lock_time);
-//		}
 	});
 	
 }
@@ -53,20 +37,24 @@ sync_handler::~sync_handler()
 
 std::string sync_handler::handle_request(std::string &resource, std::string &request, request_type http_type)
 {
-	if (resource == REGISTER_CONFIG) {
-		if (http_type == request_type::POST) {
-			return handle_register(request);
+	try {
+		if (resource == REGISTER_CONFIG) {
+			if (http_type == request_type::POST) {
+				return handle_register(request);
+			} else {
+				return handle_config();
+			}
+		} else if (resource == DELETE_USER) {
+			return handle_delete(request);
+		} else if (resource == SYNC_INITIAL) {
+			return handle_sync_initial(request);
+		} else if (resource == SYNC_FINAL) {
+			return handle_sync_final(request);
 		} else {
-			return handle_config();
+			return "{ error: \"Bad Request\" }";;
 		}
-	} else if (resource == DELETE_USER) {
-		return handle_delete(request);
-	} else if (resource == SYNC_INITIAL) {
-		return handle_sync_initial(request);
-	} else if (resource == SYNC_FINAL) {
-		return handle_sync_final(request);
-	} else {
-		return "{ error: \"Bad Request\" }";;
+	} catch (const char *error) {
+		throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 	}
 }
 

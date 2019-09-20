@@ -26,6 +26,8 @@
 #define DB_NAME "passvault"
 #define DB_USER "user"
 #define DB_PASS "password"
+#define DB_MIN_CONNECTIONS 10
+#define DB_MAX_CONNECTIONS 100
 #define DB_CLEANER true
 #define DB_CLEANER_INTERVAL 1
 #define DB_CLEANER_PURGE_DAYS 30
@@ -95,6 +97,8 @@ private:
 	std::string db_password = DB_PASS;
 	std::string db_username = DB_USER;
 	std::string db_name = DB_NAME;
+	int db_min_connections = DB_MIN_CONNECTIONS;
+	int db_max_connections = DB_MAX_CONNECTIONS;
 	bool db_cleaner = DB_CLEANER;
 	int db_cleaner_interval = DB_CLEANER_INTERVAL;
 	int db_cleaner_purge_days = DB_CLEANER_PURGE_DAYS;
@@ -117,6 +121,8 @@ public:
 	void setDbPort(const std::string& db_port) {this->db_port = db_port;}
 	void setDbServer(const std::string& db_server) {this->db_server = db_server;}
 	void setDbUsername(const std::string& db_username) {this->db_username = db_username;}
+	void setDbMaxConnections(int db_max_connections) {this->db_max_connections = db_max_connections;}
+	void setDbMinConnections(int db_min_connections) {this->db_min_connections = db_min_connections;}
 	void setServerCert(const std::string& server_cert) {this->server_cert = server_cert;}
 	void setServerKey(const std::string& server_key) {this->server_key = server_key;}
 	void setServiceThreads(int service_threads) {this->service_threads = service_threads;}
@@ -139,6 +145,8 @@ public:
 	const std::string& getDbPort() const {return db_port;}
 	const std::string& getDbServer() const {return db_server;}
 	const std::string& getDbUsername() const {return db_username;}
+	int getDbMaxConnections() const {return db_max_connections;}
+	int getDbMinConnections() const {return db_min_connections;}
 	const std::string& getServerCert() const {return server_cert;}
 	const std::string& getServerKey() const {return server_key;}
 	int getServiceThreads() const {return service_threads;}

@@ -83,6 +83,10 @@ void Config::setKeyValue(char* key, char* value)
 		server_tcp_back_log = atoi(value);
 	} else if (strcmp(key, "max_account_pending_ops") == 0) {
 		max_account_pending_ops = atoi(value);
+	} else if (strcmp(key, "db_max_connections") == 0) {
+		db_max_connections = atoi(value);
+	} else if (strcmp(key, "db_min_connections") == 0) {
+		db_min_connections = atoi(value);
 	}
 }
 
@@ -107,6 +111,8 @@ void Config::debugValues()
 	std::cout << "db user: " << db_username << std::endl;
 	std::cout << "db pass: " << db_password << std::endl;
 	std::cout << "db name: " << db_name << std::endl;
+	std::cout << "db min connections: " << db_min_connections << std::endl;
+	std::cout << "db max connections: " << db_max_connections << std::endl;
 	std::cout << "db cleaner: " << db_cleaner << std::endl;
 	std::cout << "db cleaner interval: " << db_cleaner_interval << std::endl;
 	std::cout << "db cleaner purge days: " << db_cleaner_purge_days << std::endl;

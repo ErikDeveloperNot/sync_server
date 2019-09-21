@@ -668,7 +668,7 @@ bool read_incoming_bytes(SSL *ssl, std::string &msg, int contentLength)
 		msg.append(buf);
 		total += bytes;
 		printf("bytes read: %d\n", bytes);
-	} while (total < contentLength || bytes == 1024); 
+	} while ((total < contentLength || bytes == 1024) && bytes != -1); 
 	// could be an issue if a header happens to be exactly 1024 since the length is not
 	// known. may look at better solution.
 	

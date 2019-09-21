@@ -50,6 +50,7 @@ private:
 	long relock_user(std::string & forUser, long lock);
 	void unlock_user(std::string & forUser, long lockTime);
 	
+	bool verify_email(std::string &);
 	bool verify_password(std::string & user, std::string & pw);
 	bool hash_password(std::string &);
 	void debug_user_infos();

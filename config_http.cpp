@@ -11,28 +11,38 @@ const char* config_http::build_reply(http_status status, http_connection con)
 const char* config_http::build_reply(http_status status, http_connection con, std::string & msg)
 {
 	std::string reply, m;
+	m = msg;
 	
 	switch (status)
 	{
 		case HTTP_200 :
 			reply = "HTTP/1.1 200 OK\r\n";
-			m = msg;
+//			m = msg;
 			break;
 		case HTTP_400 :
 			reply = "HTTP/1.1 400 Bad Request\r\n";
-			m = "{ error: \"Bad Request\" }";
+			
+			if (msg.length() < 1)
+				m = "{ error: \"Bad Request\" }";
 			break;
 		case HTTP_403 :
 			reply = "HTTP/1.1 403 Forbidden\r\n";
-			m = "{ error: \"Unauthorized\" }";
+			
+			
+			if (msg.length() < 1)
+				m = "{ error: \"Unauthorized\" }";
 			break;	
 		case HTTP_500 :
 			reply = "HTTP/1.1 500 Internal Server Error\r\n";
-			m = "{ error: \"Internal Server Error\" }";
+			
+			if (msg.length() < 1)
+				m = "{ error: \"Internal Server Error\" }";
 			break;
 		case HTTP_503 :
 			reply = "HTTP/1.1 503 Service Unavailable\r\n";
-			m = "{ error: \"Server Busy\" }";
+			
+			if (msg.length() < 1)
+				m = "{ error: \"Server Busy\" }";
 			break;
 	}
 	

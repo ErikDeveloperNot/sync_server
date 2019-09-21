@@ -72,6 +72,11 @@ std::string sync_handler::handle_register(std::string& request)
 		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
 	}
 	
+	if (!verify_email(registerConfigReq.email)) {
+		std::string error{"{ error: \"Invalid Email\" }"};
+		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con, error)};
+	}
+	
 	//hash password
 	std::string hashedPassword = registerConfigReq.password;
 	
@@ -486,6 +491,86 @@ bool sync_handler::verify_password(std::string & user, std::string & pw)
 	}
 	
 	return true;
+}
+
+
+//will not allow quoted labels or bracketed domains or ip domains
+bool sync_handler::verify_email(std::string& email)
+{
+	bool local_valid{false};
+	int local_l_max{64};
+	char last_char = '.';
+	int i{0};
+
+	for ( ; i < email.length(); i++) {
+		char c = email[i];
+		
+		if (c == '@') {
+			if (last_char == '.')
+				return false;
+				
+			break;
+		} else if ((c == '.' && last_char == '.') || i >= local_l_max) {
+			return false;
+		} else if ((c >= ']' && c <= '~') || (c >= '?' && c <= '[') || c == '!' || c == '=' ||
+					(c >= '#' && c <= '\'') || (c >= '*' && c<= '+') || (c >= '-' && c <= '9')) {
+							
+			local_valid = true;
+			last_char = c;
+		} else {
+			return false;
+		}
+					
+	}
+	
+	if (!local_valid)
+		return false;
+		
+	i++;
+	bool all_alpha{true};
+	bool domain_valid{false};
+	int domain_length{0};
+	int label_length{0};
+	int domain_l_max{253};
+	int label_l_max{63};
+	
+	last_char = '.';
+
+	for ( ; i < email.length(); i++, domain_length++, label_length++) {
+		char c = email[i];
+
+		if (domain_length > domain_l_max || label_length > label_l_max || c == '@')
+			return false;
+	
+		if (c == '.') {
+			if (last_char == '.' || last_char == '-')
+				return false;
+				
+			label_length = 0;
+			domain_valid = false;
+			all_alpha = true;
+		} else if (c == '-') {
+			if (last_char == '.' || last_char == '-')
+				return false;
+				
+			domain_valid = false;
+			all_alpha = false;
+		} else if ((c >= ']' && c <= '~') || (c >= '?' && c <= '[') || c == '!' || c == '=' ||
+					(c >= '#' && c <= '\'') || (c >= '*' && c<= '+') || (c >= '-' && c <= '9')) {
+			
+			domain_valid = true;
+						
+			if ((c < 'a' || c > 'z') && (c < 'A' || c > 'Z'))
+				all_alpha = false;
+		} else {
+			return false;
+		}
+		
+		last_char = c;
+	}
+
+	if (domain_valid && all_alpha)
+		return true;
 }
 
 

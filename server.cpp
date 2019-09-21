@@ -91,7 +91,9 @@ server::server(Config *conf)
 	
 	current_thread_count = 0;
 	active_threads = 0;
-
+	
+	store.initialize(config);
+	
 	for (int i{1}; i<=config->getServiceThreads(); i++) {
 		start_service_thread();
 	}
@@ -440,7 +442,7 @@ void server::start_service_thread()
 	std::thread t{service_thread, std::ref(service_q), std::ref(service_mutex), 
 						std::ref(cv), ctx, std::ref(current_connections), config, std::ref(infos),
 						std::ref(connection_fds), std::ref(conn_map), std::ref(connection_fds_mutex),
-						control[1], std::ref(active_threads)};
+						control[1], std::ref(active_threads), std::ref(store)};
 	
 		printf("Thread: %d, started, current thread count: %d\n", t.get_id(), current_thread_count);
 		t.detach();
@@ -500,7 +502,7 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
 					 std::map<std::string, User_info> & infos, fd_set & connections_fd, 
 					 std::map<int, conn_meta> & conn_map, std::mutex &connections_fd_mutex,
-					 int control, std::atomic_int & active_threads)
+					 int control, std::atomic_int & active_threads, data_store_connection &store)
 {
 	std::thread::id id = std::this_thread::get_id();
 	std::stringstream ss;
@@ -511,7 +513,7 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 	t += id_str;
 	const char *t_id = t.c_str();
 	
-	sync_handler handler{t, config, infos};
+	sync_handler handler{t, config, infos, store};
 	config_http configHttp;
 	
 	SSL *ssl;
@@ -666,7 +668,7 @@ bool read_incoming_bytes(SSL *ssl, std::string &msg, int contentLength)
 		msg.append(buf);
 		total += bytes;
 		printf("bytes read: %d\n", bytes);
-	} while (total < contentLength || bytes == 1024); 
+	} while ((total < contentLength || bytes == 1024) && bytes != -1); 
 	// could be an issue if a header happens to be exactly 1024 since the length is not
 	// known. may look at better solution.
 	

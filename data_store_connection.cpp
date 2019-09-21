@@ -2,65 +2,100 @@
 
 #include <string>
 #include <thread>
-
+#include <chrono>
+#include <ctime>
 
 
 float account_format = 1.00;
 
-data_store_connection::data_store_connection() : connected{false}
+data_store_connection::data_store_connection() //: connected{false}
 {
 }
 
 data_store_connection::~data_store_connection()
 {
-	PQfinish(conn);
+//	PQfinish(conn);
+	connections_mutex.lock();
+	
+	for (PGconn *conn : connections)
+		PQfinish(conn);
+		
+	connections.clear();
+	connections_mutex.unlock();
+	printf("data_store_connection destroyed\n");
 }
 
 
-bool data_store_connection::initialize(const std::string &thread_name, Config *config) 
+bool data_store_connection::initialize(Config *config) 
 {
-	t_id = thread_name;
 	this->config = config;
-
-	if (connect()) {
-		createPreparedStatements();
-	} else {
-		printf("%s: was unable to create store connection, will retry at next request\n", t_id.c_str());
-		return false;
-	}
+	current_connections = config->getDbMinConnections();
+	max_connections = config->getDbMaxConnections();
 	
-	return true;
+	for (size_t i{0}; i < config->getDbMinConnections(); i++) {
+
+		try {
+			PGconn *conn = connect();
+
+			if (createPreparedStatements(conn)) {
+				connections.push_back(conn);
+			} else {
+				current_connections--;
+				PQfinish(conn);
+			}
+		} catch (const char *error) {
+			printf("Error in data_store initialize: %s\n", error);
+			current_connections--;
+		}
+	}
+
+	printf("Data store initialized with: %d:%d connections\n", current_connections, connections.size());
+	start_connection_manager();
+	
+	if (config->isDbCleaner())
+		start_data_cleaner();
+	
+	return (current_connections > 0) ? true : false;
 }
 
 
-void data_store_connection::createPreparedStatements()
+bool data_store_connection::createPreparedStatements(PGconn* conn)
 {
-	//not sure under waht conditions a prepare would fail so ignoring false return for now
-	prepare(create_user_pre, CREATE_USER_PREPARE, 4);
-	prepare(delete_user_pre, DELETE_USER_PREPARE, 1);
-	prepare(update_last_sync_time_pre, UPDATE_USER_LAST_SYNC_PREPARE, 2);
-	prepare(get_accounts_for_user_pre, GET_ACCOUNTS_FOR_USER_PREPARE, 1);
-//	prepare(create_account_pre, CREATE_ACCOUNT_PREPARE, 8);
-//	prepare(update_account_pre, UPDATE_ACCOUNT_PREPARE, 8);
-	prepare(upsert_account_pre, UPSERT_ACCOUNT_PREPARE, 8);
+	bool success{true};
 	
-	//should be 5 statements for this connection
-	res = PQexec(conn, "select * from pg_prepared_statements");
+	if (!prepare(conn, create_user_pre, CREATE_USER_PREPARE, 4))
+		success = false;
+	
+	if (!prepare(conn, delete_user_pre, DELETE_USER_PREPARE, 1))
+		success = false;
+	
+	if (!prepare(conn, update_last_sync_time_pre, UPDATE_USER_LAST_SYNC_PREPARE, 2))
+		success = false;
+	
+	if (!prepare(conn, get_accounts_for_user_pre, GET_ACCOUNTS_FOR_USER_PREPARE, 1))
+		success = false;
+	
+//	if (!prepare(conn, upsert_account_pre, UPSERT_ACCOUNT_PREPARE, 8))
+//		success = false;
+	
+	//should be 4 statements for this connection
+	PGresult *res = PQexec(conn, "select * from pg_prepared_statements");
 	
 	if (PQresultStatus(res) != PGRES_TUPLES_OK) {
 		printf("Check prepare count failed: %s\n", PQerrorMessage(conn));
 	} else {
 		printf("Prepared %d statements\n", PQntuples(res));
 	}
-	
+
 	PQclear(res);
+	return success;
 }
 
 
-bool data_store_connection::prepare(const char *prep_name, const std::string &prep_def, int count)
+bool data_store_connection::prepare(PGconn* conn, const char *prep_name, const std::string &prep_def, int count)
 {
 	bool success{true};
-	res = PQprepare(conn, prep_name, prep_def.c_str(), count, NULL);
+	PGresult *res = PQprepare(conn, prep_name, prep_def.c_str(), count, NULL);
 						
 	if (PQresultStatus(res) != PGRES_COMMAND_OK) {
 		printf("PQprepare %s, failed: %s\n", prep_name, PQerrorMessage(conn));
@@ -72,8 +107,9 @@ bool data_store_connection::prepare(const char *prep_name, const std::string &pr
 }
 
 
-bool data_store_connection::connect()
+PGconn* data_store_connection::connect()
 {
+	bool connected{false};
 	int attempts{1};
 	std::string conn_info{""};
 	conn_info.append("hostaddr=").append(config->getDbServer());
@@ -82,50 +118,27 @@ bool data_store_connection::connect()
 	conn_info.append(" user=").append(config->getDbUsername());
 	conn_info.append(" password=").append(config->getDbPassword());
 	int interval{1};
-PGconn *tmp;
+	PGconn *conn;
+	
 	do {
-		tmp = PQconnectdb(conn_info.c_str());
+		conn = PQconnectdb(conn_info.c_str());
 
-		if (PQstatus(tmp) != CONNECTION_OK) {
-			fprintf(stderr, "%s: Attempt %d, Connection to database failed: %s", t_id.c_str(), attempts, PQerrorMessage(tmp));
-			PQfinish(tmp);
+		if (PQstatus(conn) != CONNECTION_OK) {
+			fprintf(stderr, "Attempt %d, Connection to database failed: %s", attempts, PQerrorMessage(conn));
+			PQfinish(conn);
 			//std::this_thread::sleep_for(std::chrono::milliseconds(CONNECT_ATTEMPTS_INTERVAL * 1000));
 			std::this_thread::sleep_for(std::chrono::milliseconds(interval++ * 1000));
 			connected = false;
 		} else {
 			connected = true;
-			conn = tmp;
 		}
 		
 	} while (!connected && attempts++ < CONNECT_ATTEMPTS);
 	
 	if (connected)
-		return true;
+		return conn;
 	else
-		return false;
-}
-
-
-bool data_store_connection::reset_connection()
-{
-printf("CURRENT STATUS: %d, conn_ok: %d, conn_sonsum: %d\n", PQstatus(conn), CONNECTION_OK, CONNECTION_NEEDED);
-	if (PQstatus(conn) == CONNECTION_OK) {
-		printf("%s: Current connection good\n", t_id.c_str());
-		connected = true;
-		return true;
-	}
-	
-	if (PQstatus(conn) >= CONNECTION_OK && PQstatus(conn) <= CONNECTION_NEEDED) {
-		printf("%s: freeing old connection\n", t_id.c_str());
-		PQfinish(conn);
-	}
-	
-	if (connect()) {
-		createPreparedStatements();
-		return true;
-	} else {
-		return false;
-	}
+		throw "Unable to connect to database";
 }
 
 
@@ -133,39 +146,18 @@ std::vector<User> data_store_connection::getAllUsers()
 {
 	std::vector<User> users;
 	
-	if (!connected)
-		if (!reset_connection())
-			return users;
-
-//	for (size_t i{0}; i<1; i++) {
-//		res = PQexec(conn, GET_USERS_SQL.c_str());
-//
-//		if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-//			printf("%s: getAllUsers failed: %s\n", t_id.c_str(), PQerrorMessage(conn));
-//			PQclear(res);
-//			
-//			if (!reset_connection())
-//				return users;
-//		} else {
-//			for (int j = 0; j < PQntuples(res); j++) {
-//				//PQgetvalue(res, i, j)
-//				users.emplace(users.begin(), std::string{PQgetvalue(res, j, 0)},
-//				std::string{PQgetvalue(res, j, 1)}, atoll(PQgetvalue(res, j, 2)));
-//			}
-//			
-//			PQclear(res);
-//			break;
-//		}
-//	}
-	
-	if (PQexec_wrapper(GET_USERS_SQL.c_str())) {
+	try {
+		PGresult *res = PQexec_wrapper(GET_USERS_SQL.c_str());
+			
 		for (int j = 0; j < PQntuples(res); j++) {
 			users.emplace(users.begin(), std::string{PQgetvalue(res, j, 0)},
 			std::string{PQgetvalue(res, j, 1)}, atoll(PQgetvalue(res, j, 2)));
 		}
-			
+				
 		PQclear(res);
-	} 
+	} catch (const char *error) {
+		printf("Error getting all userers, %s\n", error);
+	}
 	
 	return users;
 }
@@ -176,25 +168,24 @@ std::map<std::string, Account> data_store_connection::get_accounts_for_user(std:
 	std::map<std::string, Account> accounts;
 	const char *values[1];
 	values[0] = user.c_str();
-
-	if (!connected)
-		if (!reset_connection())
-			return accounts;
-
-	if (!PQexecPrepared_wrapper(get_accounts_for_user_pre, values, 1)) {
-		return accounts;
-	}
 	
-	for (int i = 0; i < PQntuples(res); i++) {
-		accounts.emplace(std::string{PQgetvalue(res, i, 0)}, Account{std::string{PQgetvalue(res, i, 0)}, 
-			std::string{PQgetvalue(res, i, 1)},
-			std::string{PQgetvalue(res, i, 2)}, std::string{PQgetvalue(res, i, 3)},
-			std::string{PQgetvalue(res, i, 4)}, std::string{PQgetvalue(res, i, 5)},
-			atoll(PQgetvalue(res, i, 6)), 
-			((std::string{PQgetvalue(res, i, 7)}=="t") ? true : false)}); //TODO TODO revist bool postgres c lib
-	}
+	try {
+		PGresult *res = PQexecPrepared_wrapper(get_accounts_for_user_pre, values, 1);
 	
-	PQclear(res);
+		for (int i = 0; i < PQntuples(res); i++) {
+			accounts.emplace(std::string{PQgetvalue(res, i, 0)}, Account{std::string{PQgetvalue(res, i, 0)}, 
+				std::string{PQgetvalue(res, i, 1)},
+				std::string{PQgetvalue(res, i, 2)}, std::string{PQgetvalue(res, i, 3)},
+				std::string{PQgetvalue(res, i, 4)}, std::string{PQgetvalue(res, i, 5)},
+				atoll(PQgetvalue(res, i, 6)), 
+				((std::string{PQgetvalue(res, i, 7)}=="t") ? true : false)}); //TODO TODO revist bool postgres c lib
+		}
+		
+		PQclear(res);
+	} catch (const char* error) {
+		printf("Error getting accounts for user: %s, error: %s\n", user.c_str(), error);
+		throw "Error in ::get_accounts_for_user";
+	}
 			
 	return accounts;
 }
@@ -202,53 +193,10 @@ std::map<std::string, Account> data_store_connection::get_accounts_for_user(std:
 
 bool data_store_connection::upsert_accounts_for_user(std::string& user, std::vector<Account>& accounts)
 {
-//	int successCount{0};
-	
-	if (!connected)
-		if (!reset_connection())
-			return false;
-
-//	const char *values[8];
-	
-//	for (size_t i{0}; i<1; i++) {
-//		for (Account &a : accounts) {
-//			values[2] = a.user_name.c_str();
-//			values[3] = a.password.c_str();
-//			values[4] = a.old_password.c_str();
-//			values[5] = a.url.c_str();
-//			values[6] = std::to_string(a.update_time).c_str();
-//			values[7] = ((a.deleted) ? "true\0" : "false\0");
-//			values[1] = user.c_str();
-//			values[0] = a.account_name.c_str();
-//			
-//	//		res = PQexecPrepared(conn, update_account_pre, 8, values, NU	LL, NULL, 0);
-//			res = PQexecPrepared(conn, upsert_account_pre, 8, values, NULL, NULL, 0);
-//		
-//			if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-//				printf("PQExec %s, failed: %s\n", upsert_account_pre, PQerrorMessage(conn));
-//				PQclear(res);
-//				
-//				if (reset_connection()) {
-//					i = -1;
-//					break;
-//				}
-//				
-//			} else {
-//				successCount++;
-//				PQclear(res);
-//			}
-//		}
-//	}
-
-//	if (successCount == accounts.size())
-//		return true;
-//	else
-//		return false;
-
-	
-	if (accounts.size() < 1)
+	if (accounts.size() < 1) 
 		return true;
 	
+	bool success{true};
 	const char *values[8 * accounts.size()];
 	std::string sql = UPSERT_ACCOUNT_PREPARE_1;
 	int i{0};
@@ -262,23 +210,22 @@ bool data_store_connection::upsert_accounts_for_user(std::string& user, std::vec
 	}
 	
 	sql += " " + UPSERT_ACCOUNT_PREPARE_2;
-//	printf("\n%s\n", sql.c_str());
 	
-	if (PQexec_wrapper(sql.c_str())) {
+	try {
+		PGresult *res = PQexec_wrapper(sql.c_str());
 		PQclear(res);
-		return true;
-	} else {
-		return false;
+	} catch (const char* error) {
+		printf("Error upserting for user: %s, error: %s\n", user.c_str(), error);
+		success = false;
+		throw "Error in ::upsert_accounts_for_user";
 	}
+
+	return success;
 }
 
 
 bool data_store_connection::createUser(User& user)
 {
-	if (!connected)
-		if (!reset_connection())
-			return false;
-			
 	bool success{true};
 	const char *values[4];
 	values[0] = user.account_uuid.c_str();
@@ -287,25 +234,14 @@ bool data_store_connection::createUser(User& user)
 //	values[3] = std::to_string(account_format).c_str();
 	values[3] = "1.00";
 	
-	if (PQexecPrepared_wrapper(create_user_pre, values, 4)) {
+	try {
+		PGresult *res = PQexecPrepared_wrapper(create_user_pre, values, 4);
 		PQclear(res);
-	} else {
+	} catch (const char* error) {
+		printf("Error creating user: %s, error: %s\n", user.account_uuid.c_str(), error);
 		success = false;
+		throw "Error in ::createUser";
 	}
-	
-//	for (size_t i{0}; i<1; i++) {
-//		res = PQexecPrepared(conn, create_user_pre, 4, values, NULL, NULL, 0);
-//		
-//		if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-//			printf("PQExec %s, failed: %s\n", create_user_pre, PQerrorMessage(conn));
-//			PQclear(res);
-//			
-//			if (!reset_connection()) 
-//				return false;
-//		} else {
-//			PQclear(res);
-//		}
-//	}
 	
 	return success;
 }
@@ -313,36 +249,19 @@ bool data_store_connection::createUser(User& user)
 
 bool data_store_connection::update_last_sync_for_user(std::string& user, long long lockTime)
 {
-	if (!connected)
-		if (!reset_connection())
-			return false;
-			
 	bool success{true};
 	const char *values[2];
 	values[0] = std::to_string(lockTime).c_str();
 	values[1] = user.c_str();
 	
-	if (PQexecPrepared_wrapper(update_last_sync_time_pre, values, 2)) {
+	try {
+		PGresult *res = PQexecPrepared_wrapper(update_last_sync_time_pre, values, 2);
 		PQclear(res);
-	} else {
+	} catch (const char* error) {
+		printf("Error updating last sync for user: %s, error: %s\n", user.c_str(), error);
 		success = false;
+		throw "Error in ::update_last_sync_for_user";
 	}
-	
-//	for (size_t i{0}; i<1; i++) {
-//		res = PQexecPrepared(conn, update_last_sync_time_pre, 2, values, NULL, NULL, 0);
-//	
-//		if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-//			printf("PQExec %s, failed: %s\n", update_last_sync_time_pre, PQerrorMessage(conn));
-//			success = false;
-//			PQclear(res);
-//			
-//			if (!reset_connection()) 
-//				return false;
-//		} else {
-//			success = true;
-//			PQclear(res);
-//		}
-//	}
 	
 	return success;
 }
@@ -350,67 +269,82 @@ bool data_store_connection::update_last_sync_for_user(std::string& user, long lo
 
 bool data_store_connection::delete_user(User& user)
 {
-	if (!connected)
-		if (!reset_connection())
-			return false;
-			
 	bool success{true};
 	const char *values[1];
 	values[0] = user.account_uuid.c_str();
 	
-	if (PQexecPrepared_wrapper(delete_user_pre, values, 1)) {
+	try {
+		PGresult *res = PQexecPrepared_wrapper(delete_user_pre, values, 1);
 		PQclear(res);
-	} else {
+	} catch (const char* error) {
+		printf("Error deleting user: %s, error: %s\n", user.account_uuid.c_str(), error);
 		success = false;
+		throw "Error in ::delete_user";
 	}
-	
-//	for (size_t i{0}; i<1; i++) {
-//		res = PQexecPrepared(conn, delete_user_pre, 1, values, NULL, NULL, 0);
-//	
-//		if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-//			printf("PQExec %s, failed: %s\n", delete_user_pre, PQerrorMessage(conn));
-//			success = false;
-//			PQclear(res);
-//			
-//			if (!reset_connection()) 
-//				return false;
-//		} else {
-//			PQclear(res);
-//		}
-//	}
 	
 	return success;
 }
 
 
-bool data_store_connection::PQexecPrepared_wrapper(const char* pre, const char *values[], int values_cnt)
+PGresult* data_store_connection::PQexecPrepared_wrapper(const char* pre, const char *values[], int values_cnt)
 {
 	bool success = true;
+//	PGconn *conn = get_connection();
+	PGconn *conn;
+	PGresult *res;
 	
 	for (size_t i{0}; i < 3; i++) {
+		try {
+			conn = get_connection();
+		} catch (const char *error) {
+			printf("Error getting connection in ::PQexecPrepared_wrapper, error: %s\n", error);
+			throw "Error executing PQexec_wrapper";
+		}
+
 		res = PQexecPrepared(conn, pre, values_cnt, values, NULL, NULL, 0);
 		
 		if (PQresultStatus(res) != PGRES_COMMAND_OK && PQresultStatus(res) != PGRES_TUPLES_OK) {
 			printf("PQExec %s, failed: %s\n", pre, PQerrorMessage(conn));
 			success = false;
 			PQclear(res);
-				
-			reset_connection();
+			
+			if (PQstatus(conn) != CONNECTION_OK) {
+				printf("DB connection bad\n");
+				connections_mutex.lock();
+				current_connections--;
+				connections_mutex.unlock();
+				connections_cv.notify_one();
+				PQfinish(conn);
+			}
+			//reset_connection(conn);
 		} else {
+			release_connection(conn);
 			success = true;
 			break;
 		}
 	}
 	
-	return success;
+	if (success)
+		return res;
+	else
+		throw "Error executing PQexecPrepared_wrapper";
 }
 
 
-bool data_store_connection::PQexec_wrapper(const char* sql)
+PGresult* data_store_connection::PQexec_wrapper(const char* sql)
 {
 	bool success = true;
+	PGconn *conn;
+	PGresult *res;
 	
 	for (size_t i{0}; i < 3; i++) {
+		try {
+			conn = get_connection();
+		} catch (const char *error) {
+			printf("Error getting connection in ::PQexec_wrapper, error: %s\n", error);
+			throw "Error executing PQexec_wrapper";
+		}
+
 		res = PQexec(conn, sql);
 		
 		if (PQresultStatus(res) != PGRES_COMMAND_OK && PQresultStatus(res) != PGRES_TUPLES_OK) {
@@ -418,13 +352,215 @@ bool data_store_connection::PQexec_wrapper(const char* sql)
 			success = false;
 			PQclear(res);
 				
-			reset_connection();
+			if (PQstatus(conn) != CONNECTION_OK) {
+				printf("DB connection bad\n");
+				connections_mutex.lock();
+				current_connections--;
+				connections_mutex.unlock();
+				connections_cv.notify_one();
+				PQfinish(conn);
+			}
 		} else {
 			success = true;
-//			PQclear(res);
+			release_connection(conn);
 			break;
 		}
 	}
 	
-	return success;
+	if (success)
+		return res;
+	else
+		throw "Error executing PQexec_wrapper";
+}
+
+
+void data_store_connection::release_connection(PGconn* conn)
+{
+	std::unique_lock<std::mutex> lock{connections_mutex};
+	connections.push_back(conn);
+	lock.unlock();
+	connections_cv.notify_one();
+}
+
+
+PGconn* data_store_connection::get_connection()
+{
+	PGconn *conn;
+	printf("unused db connections: %d, current connections count: %d\n", connections.size(), current_connections);
+	std::unique_lock<std::mutex> lock{connections_mutex};
+	
+	if (connections.size() > 0) {
+		//get a connection
+		conn = connections.back();
+		connections.pop_back();
+	} else if (current_connections < max_connections) {
+		//create a new connection
+		current_connections++;
+		lock.unlock();
+		printf("Creating new db connection\n");
+		
+		try {
+			conn = connect();
+		
+			if (createPreparedStatements(conn)) {
+				return conn;
+			} else {
+				PQfinish(conn);
+				lock.lock();
+				current_connections--;
+				lock.unlock();
+				connections_cv.notify_one();
+				throw "Error creating prepared statemnets in ::get_connection";
+			}
+		} catch (const char *error) {
+			lock.lock();
+			current_connections--;
+			lock.unlock();
+			connections_cv.notify_one();
+			throw "Error getting connection in ::get_connection";
+		}
+	} else {
+		//all connections used and max created so wait
+		connections_cv.wait(lock, [&] {
+			printf("Waiting for db connection to becom free\n");
+			return connections.size() > 0;
+		});
+		
+		conn = connections.back();
+		connections.pop_back();
+	}
+	
+	connections_cv.notify_one();
+	return conn;
+}
+
+
+void data_store_connection::start_connection_manager()
+{
+	printf("Starting db connection manager thread\n");
+	
+	std::thread manager([&] () {
+		int min_conn = config->getDbMinConnections();
+		int counter{0};
+		int magic_number{2};
+		std::vector<PGconn *> conns_to_close;
+		
+		while (true) {
+			std::this_thread::sleep_for(std::chrono::seconds(60));
+			printf("Data Store connection manager is woke\n");
+			
+			connections_mutex.lock();
+			int curr = current_connections;
+			int in_use = curr - connections.size();
+//			connections_mutex.unlock();
+//			connections_cv.notify_one();
+			
+			if (curr < min_conn) {
+				//need to add connections
+			} else if (curr == min_conn || in_use > 0.2 * curr) {
+				//nothing to do, at min or enough cons are being used so dont shrink
+				counter = 0;
+			} else {
+				//increment counter and check if connections need to be removed
+				if (++counter >= magic_number) {
+					int to_close = (curr - min_conn) * 0.4;
+					
+					if (to_close < 1)
+						to_close = curr - min_conn;
+						
+					for (size_t i{0}; i<to_close; i++) {
+						conns_to_close.push_back(connections.back());
+						connections.pop_back();
+						current_connections--;
+					}
+				}
+			}
+			
+			connections_mutex.unlock();
+			connections_cv.notify_one();
+			printf("Data Store connection current connections: %d, inuse: %d, counter: %d\n", curr, in_use, counter);
+			
+			if (conns_to_close.size() > 0) {
+				printf("Closing %d data store connections\n", conns_to_close.size());
+				
+				for (PGconn *conn : conns_to_close)
+					PQfinish(conn);
+					
+				conns_to_close.clear();
+				counter = 0;
+			}
+		}
+	});
+	
+	manager.detach();
+}
+
+
+long current_time_sec()
+{
+	return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+long get_next_run()
+{
+	time_t h = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+	tm *local = localtime(&h);
+	long sleep_for_minutes = 59 - local->tm_min;
+	sleep_for_minutes += (23 - local->tm_hour) * 60;
+	return sleep_for_minutes + 2;
+}
+
+// interval is in days, how often the cleaner runs, at most once a day
+// days is how long to keep deleted accounts in the history table
+void data_store_connection::start_data_cleaner()
+{
+	std::thread cleaner([&] () {
+		int interval = config->getDbCleanerInterval();
+		int days = config->getDbCleanerPurgeDays();
+		long day_in_milli{86400000};
+		long day_in_sec{86400};
+		long day_in_min{1440};
+		//first run will be at next midnight + 2 minutes no matter what the interval is
+		long next_run = get_next_run();
+		printf("DB Cleaner started, interval: %d, days: %d, next run: %d minutes\n", interval, days, next_run);
+		
+		while (true) {
+			printf("DB Cleaner sleeping for %ld minutes\n", next_run);
+			std::this_thread::sleep_for(std::chrono::minutes(next_run));
+			printf("DB Cleaner starting task\n");
+			long curr_sec = current_time_sec();
+			long delete_sec = curr_sec - (days * day_in_sec);
+			printf("DB cleaner removing any history accounts older then %ld\n", delete_sec);
+			std::string select_sql_smt = ACCOUNT_HISTORY_SQL + std::to_string(delete_sec);
+			std::string delete_sql_smt = DELETE_HISTORY_SQL + std::to_string(delete_sec);
+			
+			try {
+				PGresult *res = PQexec_wrapper(select_sql_smt.c_str());
+				int cnt = PQntuples(res);
+			
+				if (cnt > 0) {
+					printf("DB cleaner, the following accounts will be removed\n");
+					
+					for (size_t i{0}; i<cnt; i++) {
+						printf("user: %s, account: %s\n", PQgetvalue(res, i, 0), PQgetvalue(res, i, 1));
+					}
+					
+					PQclear(res);
+					res = PQexec_wrapper(delete_sql_smt.c_str());
+					PQclear(res);
+				} else {
+					printf("DB cleaner, no accounts will be removed\n");
+					PQclear(res);
+				}
+				
+			} catch (const char *error) {
+				printf("DB cleaner, error executing delete: %s\n", error);
+			}
+			
+			next_run = get_next_run() + (day_in_min * (1-interval));
+			printf("Next run will in %d minutes\n", next_run);
+		}
+	});
+	
+	cleaner.detach();
 }

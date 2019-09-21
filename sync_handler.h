@@ -21,7 +21,7 @@ class sync_handler
 {
 private:
 	std::string t_id;
-	data_store_connection store;
+	data_store_connection &store;
 	Config *config;
 	std::map<std::string, User_info> &user_infos;
 	
@@ -50,11 +50,12 @@ private:
 	long relock_user(std::string & forUser, long lock);
 	void unlock_user(std::string & forUser, long lockTime);
 	
+	bool verify_email(std::string &);
 	bool verify_password(std::string & user, std::string & pw);
 	bool hash_password(std::string &);
 	void debug_user_infos();
 public:
-	sync_handler(const std::string &, Config *, std::map<std::string, User_info> &);
+	sync_handler(const std::string &, Config *, std::map<std::string, User_info> &, data_store_connection &store);
 	~sync_handler();
 
 	std::string handle_request(std::string &resource, std::string &request, request_type http_type);

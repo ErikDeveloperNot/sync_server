@@ -103,8 +103,9 @@ public:
 
 void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
 					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
-					 std::map<std::string, User_info> &, fd_set &, std::map<int, conn_meta> &,
-					 std::mutex &fd_set_mutex, int, std::atomic_int &active_threads, data_store_connection &store);
+					 std::map<std::string, User_info> &, fd_set &, std::mutex &fd_set_mutex, int, 
+					 std::atomic_int &active_threads, data_store_connection &store, std::vector<int> &, std::mutex &,
+					 int);
 
 
 

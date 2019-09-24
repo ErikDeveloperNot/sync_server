@@ -447,7 +447,7 @@ void data_store_connection::start_connection_manager()
 		
 		while (true) {
 			std::this_thread::sleep_for(std::chrono::seconds(60));
-			printf("Data Store connection manager is woke\n");
+//			printf("Data Store connection manager is woke\n");
 			
 			connections_mutex.lock();
 			int curr = current_connections;
@@ -456,7 +456,7 @@ void data_store_connection::start_connection_manager()
 //			connections_cv.notify_one();
 			
 			if (curr < min_conn) {
-				//need to add connections
+				//need to add connections, let the sync handler threads do it
 			} else if (curr == min_conn || in_use > 0.2 * curr) {
 				//nothing to do, at min or enough cons are being used so dont shrink
 				counter = 0;
@@ -478,7 +478,7 @@ void data_store_connection::start_connection_manager()
 			
 			connections_mutex.unlock();
 			connections_cv.notify_one();
-			printf("Data Store connection current connections: %d, inuse: %d, counter: %d\n", curr, in_use, counter);
+//			printf("Data Store connection current connections: %d, inuse: %d, counter: %d\n", curr, in_use, counter);
 			
 			if (conns_to_close.size() > 0) {
 				printf("Closing %d data store connections\n", conns_to_close.size());

@@ -102,6 +102,7 @@ server::server(Config *conf)
 	
 	if (config->isServerUseKeepAliveCleaner())
 		start_client_seesion_manager();
+		
 }
 
 
@@ -441,8 +442,8 @@ void server::start_service_thread()
 	
 	std::thread t{service_thread, std::ref(service_q), std::ref(service_mutex), 
 						std::ref(cv), ctx, std::ref(current_connections), config, std::ref(infos),
-						std::ref(connection_fds), std::ref(conn_map), std::ref(connection_fds_mutex),
-						control[1], std::ref(active_threads), std::ref(store)};
+						std::ref(connection_fds), std::ref(connection_fds_mutex), control[1], std::ref(active_threads), 
+						std::ref(store), std::ref(clients_to_close), std::ref(clients_to_close_mux), control2[1]};
 	
 		printf("Thread: %d, started, current thread count: %d\n", t.get_id(), current_thread_count);
 		t.detach();
@@ -501,8 +502,9 @@ bool parse_header(std::string &header, std::string &operation, std::string &cont
 void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
 					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
 					 std::map<std::string, User_info> & infos, fd_set & connections_fd, 
-					 std::map<int, conn_meta> & conn_map, std::mutex &connections_fd_mutex,
-					 int control, std::atomic_int & active_threads, data_store_connection &store)
+					 std::mutex &connections_fd_mutex, int control, std::atomic_int & active_threads, 
+					 data_store_connection &store, std::vector<int> &clients_to_close, std::mutex &clients_to_close_mux,
+					 int clients_to_close_control)
 {
 	std::thread::id id = std::this_thread::get_id();
 	std::stringstream ss;
@@ -559,6 +561,14 @@ printf("New SSL session needed\n");
 				printf("Thread %s Error doing SSL handshake.\n", t_id);
 				ssl_errros = true;
 				ERR_print_errors_fp(stderr);
+				// dont add client socket back to master FDset, let cleaner thread remove the connection
+				client->active = false;
+				client->last_used = 1;
+				clients_to_close_mux.lock();
+				clients_to_close.push_back(client->socket);
+				clients_to_close_mux.unlock();
+				write(clients_to_close_control, control_buf, 1);
+				continue;
 			}
 		}
 		
@@ -656,7 +666,7 @@ bool verify_request(std::string &method, std::string &operation)
 	}
 }
 
-
+// ********** TODO REVIST, this will fail if the header happens to be 1024 ***************
 bool read_incoming_bytes(SSL *ssl, std::string &msg, int contentLength)
 {
 	char buf[1024] = {0};
@@ -668,7 +678,7 @@ bool read_incoming_bytes(SSL *ssl, std::string &msg, int contentLength)
 		msg.append(buf);
 		total += bytes;
 		printf("bytes read: %d\n", bytes);
-	} while ((total < contentLength || bytes == 1024) && bytes != -1); 
+	} while ((total < contentLength || SSL_pending(ssl) > 0/*&& bytes == 1024*/) && bytes != -1); 
 	// could be an issue if a header happens to be exactly 1024 since the length is not
 	// known. may look at better solution.
 	

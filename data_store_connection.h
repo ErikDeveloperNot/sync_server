@@ -43,6 +43,8 @@ struct Account {
 static const std::string GET_USERS_SQL = "SELECT * FROM users";
 static const std::string ACCOUNT_HISTORY_SQL = "SELECT account_uuid, account_name FROM history WHERE insert_time < ";
 static const std::string DELETE_HISTORY_SQL = "DELETE FROM history WHERE insert_time < ";
+static const std::string OLD_ACCOUNT_SQL = "SELECT account_uuid, account_name FROM accounts WHERE update_time < ";
+static const std::string DELETE_OLD_ACCOUNTS_SQL = "DELETE FROM accounts WHERE update_time < ";
 
 // Prepared statements
 static const std::string CREATE_USER_PREPARE = "INSERT INTO users VALUES ($1::text, $2::text, $3::bigint, $4::numeric)";

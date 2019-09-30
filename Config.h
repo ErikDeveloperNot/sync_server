@@ -102,6 +102,8 @@ private:
 	bool db_cleaner = DB_CLEANER;
 	int db_cleaner_interval = DB_CLEANER_INTERVAL;
 	int db_cleaner_purge_days = DB_CLEANER_PURGE_DAYS;
+	int db_cleaner_history_purge_days = DB_CLEANER_PURGE_DAYS;
+	
 	
 	void setKeyValue(char*, char*);
 	
@@ -116,6 +118,7 @@ public:
 	void setDbCleaner(bool db_cleaner) {this->db_cleaner = db_cleaner;}
 	void setDbCleanerInterval(int db_cleaner_interval) {this->db_cleaner_interval = db_cleaner_interval;}
 	void setDbCleanerPurgeDays(int db_cleaner_purge_days) {this->db_cleaner_purge_days = db_cleaner_purge_days;}
+	void setDbCleanerHistoryPurgeDays(int db_cleaner_history_purge_days) {this->db_cleaner_history_purge_days = db_cleaner_history_purge_days;}
 	void setDbName(const std::string& db_name) {this->db_name = db_name;}
 	void setDbPassword(const std::string& db_password) {this->db_password = db_password;}
 	void setDbPort(const std::string& db_port) {this->db_port = db_port;}
@@ -140,6 +143,7 @@ public:
 	bool isDbCleaner() const {return db_cleaner;}
 	int getDbCleanerInterval() const {return db_cleaner_interval;}
 	int getDbCleanerPurgeDays() const {return db_cleaner_purge_days;}
+	int getDbCleanerHistoryPurgeDays() const {return db_cleaner_history_purge_days;}
 	const std::string& getDbName() const {return db_name;}
 	const std::string& getDbPassword() const {return db_password;}
 	const std::string& getDbPort() const {return db_port;}

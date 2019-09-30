@@ -501,6 +501,11 @@ long current_time_sec()
 	return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
+long current_time_milli()
+{
+	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
 long get_next_run()
 {
 	time_t h = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -517,29 +522,60 @@ void data_store_connection::start_data_cleaner()
 	std::thread cleaner([&] () {
 		int interval = config->getDbCleanerInterval();
 		int days = config->getDbCleanerPurgeDays();
+		int history_days = config->getDbCleanerHistoryPurgeDays();
 		long day_in_milli{86400000};
 		long day_in_sec{86400};
 		long day_in_min{1440};
 		//first run will be at next midnight + 2 minutes no matter what the interval is
 		long next_run = get_next_run();
-		printf("DB Cleaner started, interval: %d, days: %d, next run: %d minutes\n", interval, days, next_run);
+		printf("DB Cleaner started, interval: %d, history days: %d, days: %d, next run: %d minutes\n", interval, history_days, days, next_run);
 		
 		while (true) {
 			printf("DB Cleaner sleeping for %ld minutes\n", next_run);
 			std::this_thread::sleep_for(std::chrono::minutes(next_run));
 			printf("DB Cleaner starting task\n");
+			
 			long curr_sec = current_time_sec();
-			long delete_sec = curr_sec - (days * day_in_sec);
-			printf("DB cleaner removing any history accounts older then %ld\n", delete_sec);
-			std::string select_sql_smt = ACCOUNT_HISTORY_SQL + std::to_string(delete_sec);
-			std::string delete_sql_smt = DELETE_HISTORY_SQL + std::to_string(delete_sec);
+			long history_delete_sec = curr_sec - (history_days * day_in_sec);
+			printf("DB cleaner removing any history accounts older then %ld\n", history_delete_sec);
+			std::string select_sql_smt = ACCOUNT_HISTORY_SQL + std::to_string(history_delete_sec);
+			std::string delete_sql_smt = DELETE_HISTORY_SQL + std::to_string(history_delete_sec);
+			
+			long curr_milli = current_time_milli();
+			long delete_milli = curr_milli - (days * day_in_milli);
+			printf("DB cleaner removing any current accounts older then %ld\n", delete_milli);
+			std::string select_old_sql_smt = OLD_ACCOUNT_SQL + std::to_string(delete_milli);
+			std::string delete_old_sql_smt = DELETE_OLD_ACCOUNTS_SQL + std::to_string(delete_milli);
+			
+			try {
+				PGresult *res = PQexec_wrapper(select_old_sql_smt.c_str());
+				int cnt = PQntuples(res);
+			
+				if (cnt > 0) {
+					printf("DB cleaner, the following current accounts will be removed\n");
+					
+					for (size_t i{0}; i<cnt; i++) {
+						printf("user: %s, account: %s\n", PQgetvalue(res, i, 0), PQgetvalue(res, i, 1));
+					}
+					
+					PQclear(res);
+					res = PQexec_wrapper(delete_old_sql_smt.c_str());
+					PQclear(res);
+				} else {
+					printf("DB cleaner, no current accounts will be removed\n");
+					PQclear(res);
+				}
+				
+			} catch (const char *error) {
+				printf("DB cleaner, error executing current accounts delete: %s\n", error);
+			}
 			
 			try {
 				PGresult *res = PQexec_wrapper(select_sql_smt.c_str());
 				int cnt = PQntuples(res);
 			
 				if (cnt > 0) {
-					printf("DB cleaner, the following accounts will be removed\n");
+					printf("DB cleaner, the following history accounts will be removed\n");
 					
 					for (size_t i{0}; i<cnt; i++) {
 						printf("user: %s, account: %s\n", PQgetvalue(res, i, 0), PQgetvalue(res, i, 1));
@@ -549,12 +585,12 @@ void data_store_connection::start_data_cleaner()
 					res = PQexec_wrapper(delete_sql_smt.c_str());
 					PQclear(res);
 				} else {
-					printf("DB cleaner, no accounts will be removed\n");
+					printf("DB cleaner, no history accounts will be removed\n");
 					PQclear(res);
 				}
 				
 			} catch (const char *error) {
-				printf("DB cleaner, error executing delete: %s\n", error);
+				printf("DB cleaner, error executing history delete: %s\n", error);
 			}
 			
 			next_run = get_next_run() + (day_in_min * (1-interval));

@@ -666,7 +666,7 @@ bool verify_request(std::string &method, std::string &operation)
 	}
 }
 
-// ********** TODO REVIST, this will fail if the header happens to be 1024 ***************
+
 bool read_incoming_bytes(SSL *ssl, std::string &msg, int contentLength)
 {
 	char buf[1024] = {0};
@@ -678,7 +678,7 @@ bool read_incoming_bytes(SSL *ssl, std::string &msg, int contentLength)
 		msg.append(buf);
 		total += bytes;
 		printf("bytes read: %d\n", bytes);
-	} while ((total < contentLength || SSL_pending(ssl) > 0/*&& bytes == 1024*/) && bytes != -1); 
+	} while ((total < contentLength || SSL_has_pending(ssl)/*&& bytes == 1024*/) && bytes != -1); 
 	// could be an issue if a header happens to be exactly 1024 since the length is not
 	// known. may look at better solution.
 	

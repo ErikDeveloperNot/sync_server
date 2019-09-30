@@ -73,6 +73,8 @@ void Config::setKeyValue(char* key, char* value)
 		db_cleaner_interval = atoi(value);
 	} else if (strcmp(key, "db_cleaner_purge_days") == 0) {
 		db_cleaner_purge_days = atoi(value);
+	} else if (strcmp(key, "db_cleaner_history_purge_days") == 0) {
+		db_cleaner_history_purge_days = atoi(value);
 	} else if (strcmp(key, "server_max_connections") == 0) {
 		server_max_connections = atoi(value);
 	} else if (strcmp(key, "server_keep_alive") == 0) {
@@ -116,4 +118,5 @@ void Config::debugValues()
 	std::cout << "db cleaner: " << db_cleaner << std::endl;
 	std::cout << "db cleaner interval: " << db_cleaner_interval << std::endl;
 	std::cout << "db cleaner purge days: " << db_cleaner_purge_days << std::endl;
+	std::cout << "db cleaner history purge days: " << db_cleaner_history_purge_days << std::endl;
 }

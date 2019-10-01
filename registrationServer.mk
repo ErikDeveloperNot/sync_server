@@ -13,7 +13,7 @@ CurrentFileName        :=
 CurrentFilePath        :=
 CurrentFileFullPath    :=
 User                   :=User One
-Date                   :=29/09/2019
+Date                   :=01/10/2019
 CodeLitePath           :="/Users/user1/Library/Application Support/CodeLite"
 LinkerName             :=/usr/bin/clang++
 SharedObjectLinkerName :=/usr/bin/clang++ -dynamiclib -fPIC
@@ -40,7 +40,7 @@ IncludePath            :=  $(IncludeSwitch). $(IncludeSwitch). $(IncludeSwitch)/
 IncludePCH             := 
 RcIncludePath          := 
 Libs                   := $(LibrarySwitch)ecpg $(LibrarySwitch)ecpg_compat $(LibrarySwitch)pgcommon $(LibrarySwitch)pgfeutils $(LibrarySwitch)pgport $(LibrarySwitch)pgtypes $(LibrarySwitch)pq $(LibrarySwitch)crypto $(LibrarySwitch)ssl $(LibrarySwitch)jsonP_dyn 
-ArLibs                 :=  "libecpg.a" "libecpg_compat.a" "libpgcommon.a" "libpgfeutils.a" "libpgport.a" "libpgtypes.a" "libpq.a" "libcrypto" "libssl" "jsonP_dyn" 
+ArLibs                 :=  "libecpg.a" "libecpg_compat.a" "libpgcommon.a" "libpgfeutils.a" "libpgport.a" "libpgtypes.a" "libpq.a" "libcrypto" "libssl" "libjsonP_dyn" 
 LibPath                := $(LibraryPathSwitch). $(LibraryPathSwitch)/opt/openssl/openssl-1.1.1c_install/lib $(LibraryPathSwitch)/Users/user1/udemy/CPP/UdemyCPP/registrationServer_psql/lib $(LibraryPathSwitch)/Users/user1/udemy/CPP/UdemyCPP/jsonP_dyn/Debug 
 
 ##

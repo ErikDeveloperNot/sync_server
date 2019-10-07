@@ -13,9 +13,9 @@
 sync_handler::sync_handler(const std::string &thread_id, Config *config, 
 							std::map<std::string, User_info> &user_infos, data_store_connection &store) :
 t_id{thread_id},
+store{store},
 config{config},
-user_infos{user_infos},
-store{store}
+user_infos{user_infos}
 {
 	std::call_once(onceFlag, [&]() {
 		printf("%s: initializing the user_infos set\n", t_id.c_str());
@@ -200,7 +200,7 @@ std::string sync_handler::handle_delete(std::string& request)
 
 std::string sync_handler::handle_sync_initial(std::string& request)
 {
-//	printf("%s\n", request.c_str());
+//	printf("Sync Initial:\n%s\n", request.c_str());
 
 	jsonP_parser parser{};
 	jsonP_doc *doc = nullptr;
@@ -235,17 +235,17 @@ std::string sync_handler::handle_sync_initial(std::string& request)
 		for (element *e : doc->get_as_array("accounts")) {
 			account_name = e->get_as_string("accountName");
 			if (accounts.count(account_name) > 0) {
-				if (e->get_as_numeric("updateTime") > accounts[account_name].update_time) {
+				if (e->get_as_numeric_long("updateTime") > accounts[account_name].update_time) {
 					//client version more recent - add to client send back to server
 					sendAccountsToServerList->add_element(new element_string{account_name});
-				} else if (accounts[account_name].update_time > e->get_as_numeric("updateTime")) {
+				} else if (accounts[account_name].update_time > e->get_as_numeric_long("updateTime")) {
 					//server version more recent - add to send back to client
 					element_object *obj = new element_object{};
 					obj->add_element("accountName", new element_string{account_name});
 					obj->add_element("deleted", new element_boolean{accounts[account_name].deleted});
 					obj->add_element("password", new element_string{accounts[account_name].password});
 					obj->add_element("oldPassword", new element_string{accounts[account_name].old_password});
-					obj->add_element("updateTime", new element_numeric{accounts[account_name].update_time});
+					obj->add_element("updateTime", new element_numeric{long(accounts[account_name].update_time)});
 					obj->add_element("userName", new element_string{accounts[account_name].user_name});
 					obj->add_element("url", new element_string{accounts[account_name].url});
 					accountsToSendBackToClient->add_element(obj);
@@ -265,7 +265,7 @@ std::string sync_handler::handle_sync_initial(std::string& request)
 			obj->add_element("deleted", new element_boolean{a.second.deleted});
 			obj->add_element("password", new element_string{a.second.password});
 			obj->add_element("oldPassword", new element_string{a.second.old_password});
-			obj->add_element("updateTime", new element_numeric{a.second.update_time});
+			obj->add_element("updateTime", new element_numeric{long(a.second.update_time)});
 			obj->add_element("userName", new element_string{a.second.user_name});
 			obj->add_element("url", new element_string{a.second.url});
 			accountsToSendBackToClient->add_element(obj);
@@ -309,7 +309,7 @@ std::string sync_handler::handle_sync_final(std::string& request)
 		for (element *obj : doc->get_as_array("accounts")) {
 			accounts.emplace_back(obj->get_as_string("accountName"), user, obj->get_as_string("userName"),
 				obj->get_as_string("password"), obj->get_as_string("oldPassword"), obj->get_as_string("url"),
-				obj->get_as_numeric("updateTime"), obj->get_as_boolean("deleted"));
+				obj->get_as_numeric_long("updateTime"), obj->get_as_boolean("deleted"));
 		}
 		
 		delete doc;
@@ -366,7 +366,7 @@ long sync_handler::lock_user(std::string& forUser)
 	
 	if (!user_infos[forUser].cv_vector.empty()) {
 		printf("%s - waiting for lock for user: %s\n", t_id.c_str(), forUser.c_str());
-		auto sec = std::chrono::seconds(30);
+//		auto sec = std::chrono::seconds(30);
 		
 		// add hndler/thread cond variable to user queue, release user_info_lock and wait on cv. TODO - add timeout later
 		std::unique_lock<std::mutex> temp_lock(handler_mutex);
@@ -395,7 +395,7 @@ long sync_handler::lock_user(std::string& forUser)
 			printf("%s - %s notified but wrong cv is in front\n", t_id.c_str(), forUser.c_str());
 			
 			std::vector<std::condition_variable *>::iterator it = user_infos[forUser].cv_vector.begin();
-			for (it; it != user_infos[forUser].cv_vector.end(); it++)
+			for (; it != user_infos[forUser].cv_vector.end(); it++)
 				if (*it == &handler_cv)
 					break;
 					

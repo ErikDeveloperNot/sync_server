@@ -185,7 +185,7 @@ void server::start()
 				served++;
 			}
 
-			long long now = current_time_ms();
+//			long long now = current_time_ms();
 			
 			for (int i=0; i<=max_fd; i++) {
 				if (rv == served) {
@@ -445,7 +445,12 @@ void server::start_service_thread()
 						std::ref(connection_fds), std::ref(connection_fds_mutex), control[1], std::ref(active_threads), 
 						std::ref(store), std::ref(clients_to_close), std::ref(clients_to_close_mux), control2[1]};
 	
-		printf("Thread: %d, started, current thread count: %d\n", t.get_id(), current_thread_count);
+		std::stringstream ss;
+		ss << t.get_id();
+		std::string t_id{"service_thread_"};
+		t_id += ss.str();
+		printf("Thread: %s, started, current thread count: %d\n", t_id.c_str(), current_thread_count);
+		
 		t.detach();
 }
 
@@ -458,7 +463,7 @@ void server::start_service_thread_manager()
 		
 		while (true) {
 			std::this_thread::sleep_for(std::chrono::milliseconds(10000));
-			long now = current_time_sec();
+//			long now = current_time_sec();
 			int current_q_sz = service_q.size();
 			
 			if (current_q_sz < current_thread_count/0.2) {
@@ -497,6 +502,7 @@ void server::start_service_thread_manager()
 bool verify_request(std::string &method, std::string &operation);
 bool read_incoming_bytes(SSL *, std::string &msg, int contentLenth);
 bool parse_header(std::string &header, std::string &operation, std::string &contentLenth, request_type &requestType);
+void close_client(conn_meta *, std::mutex &, std::vector<int> &, int, char *);
 
 // definition of service thread-
 void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
@@ -518,7 +524,7 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 	sync_handler handler{t, config, infos, store};
 	config_http configHttp;
 	
-	SSL *ssl;
+//	SSL *ssl;
 	conn_meta *client;
 	char control_buf[1];
 	
@@ -562,12 +568,14 @@ printf("New SSL session needed\n");
 				ssl_errros = true;
 				ERR_print_errors_fp(stderr);
 				// dont add client socket back to master FDset, let cleaner thread remove the connection
-				client->active = false;
-				client->last_used = 1;
-				clients_to_close_mux.lock();
-				clients_to_close.push_back(client->socket);
-				clients_to_close_mux.unlock();
-				write(clients_to_close_control, control_buf, 1);
+//				client->active = false;
+//				client->last_used = 1;
+//				clients_to_close_mux.lock();
+//				clients_to_close.push_back(client->socket);
+//				clients_to_close_mux.unlock();
+//				write(clients_to_close_control, control_buf, 1);
+				close_client(client, clients_to_close_mux, clients_to_close, clients_to_close_control, control_buf);
+				active_threads--;
 				continue;
 			}
 		}
@@ -578,12 +586,12 @@ printf("New SSL session needed\n");
 			std::string operation{};
 			std::string contentLength{};
 			request_type requestType;
-			char buf[1024] = {0};
-			int bytes, total{0};
+//			char buf[1024] = {0};
+//			int bytes, total{0};
 			
 			if (read_incoming_bytes(client->ssl, header, 0)) {
-				bool valid{true};
-				printf("http header bytes read: %d, header\n%s\n", header.length(), header.c_str());
+//				bool valid{true};
+				printf("http header bytes read: %lu, header\n%s\n", header.length(), header.c_str());
 
 				const char * reply;
 
@@ -614,7 +622,8 @@ printf("New SSL session needed\n");
 							std::string replyMsg = handler.handle_request(operation, request, requestType);
 							reply = configHttp.build_reply(HTTP_200, keep_alive, replyMsg);
 						} else {
-							reply = configHttp.build_reply(HTTP_400, close_con);
+//							reply = configHttp.build_reply(HTTP_400, close_con);
+							throw register_server_exception(configHttp.build_reply(HTTP_400, close_con));
 						}
 						
 						int written = SSL_write(client->ssl, reply, strlen(reply));
@@ -625,6 +634,9 @@ printf("New SSL session needed\n");
 					printf("\n%s: Error:\nHeader\n%s\nRequest\n%s\nError\n%s\n", t_id, 
 							header.c_str(), request.c_str(), ex.what());
 					SSL_write(client->ssl, ex.what(), strlen(ex.what()));
+					close_client(client, clients_to_close_mux, clients_to_close, clients_to_close_control, control_buf);
+					active_threads--;
+					continue;
 				}
 			}
 		}
@@ -728,4 +740,16 @@ bool parse_header(std::string &header, std::string &operation, std::string &cont
 	}
 	
 	return true;
+}
+
+
+void close_client(conn_meta *client, std::mutex &clients_to_close_mux, std::vector<int> &clients_to_close, 
+					int clients_to_close_control, char *control_buf)
+{
+	client->active = false;
+	client->last_used = 1;
+	clients_to_close_mux.lock();
+	clients_to_close.push_back(client->socket);
+	clients_to_close_mux.unlock();
+	write(clients_to_close_control, control_buf, 1);
 }

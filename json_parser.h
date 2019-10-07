@@ -24,8 +24,8 @@ struct register_config_reply {
 	
 	register_config_reply(const std::string &server, int port, std::string &protocol, std::string &user,
 		std::string &pass) : 
-		server{server},
 		port{port},
+		server{server},
 		protocol{protocol},
 		userName{user},
 		password{pass} {}
@@ -102,6 +102,8 @@ struct sync_final_request {
 class json_parser
 {
 private:
+	char invalid_json[24] = "Invalid json Exception\0";
+
 	std::string get_next_json_object(std::string &);
 	int eat_white_sapce(std::string &json, int index);
 	int get_key(std::string &json, int index, std::string &key);

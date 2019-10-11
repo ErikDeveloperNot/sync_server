@@ -536,10 +536,10 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 		{
 			std::unique_lock<std::mutex> lock{q_mutex};
 
-if (q.size() < 1)
-			cv.wait(lock, [&] {
-				return q.size() > 0;
-			});
+			if (q.size() < 1)
+				cv.wait(lock, [&] {
+					return q.size() > 0;
+				});
 			
 			active_threads++;
 			printf(">>%s going to work\n", t_id);
@@ -559,7 +559,7 @@ if (q.size() < 1)
 		bool ssl_errros{false};
 		
 		if (!client->ssl) {
-printf("New SSL session needed\n");
+			printf("%s New SSL session needed for fd: %d\n", t_id, client->socket);
 			client->ssl = SSL_new(ctx);
 			SSL_set_fd(client->ssl, client->socket);
 
@@ -568,12 +568,6 @@ printf("New SSL session needed\n");
 				ssl_errros = true;
 				ERR_print_errors_fp(stderr);
 				// dont add client socket back to master FDset, let cleaner thread remove the connection
-//				client->active = false;
-//				client->last_used = 1;
-//				clients_to_close_mux.lock();
-//				clients_to_close.push_back(client->socket);
-//				clients_to_close_mux.unlock();
-//				write(clients_to_close_control, control_buf, 1);
 				close_client(client, clients_to_close_mux, clients_to_close, clients_to_close_control, control_buf);
 				active_threads--;
 				continue;
@@ -591,7 +585,7 @@ printf("New SSL session needed\n");
 			
 			if (read_incoming_bytes(client->ssl, header, 0)) {
 //				bool valid{true};
-				printf("http header bytes read: %lu, header\n%s\n", header.length(), header.c_str());
+				printf("%s http header bytes read: %lu, header\n%s\n", t_id, header.length(), header.c_str());
 
 				const char * reply;
 
@@ -627,7 +621,7 @@ printf("New SSL session needed\n");
 						}
 						
 						int written = SSL_write(client->ssl, reply, strlen(reply));
-						printf("Bytes written: %d\n, reply:\n%s\n", written, reply);
+						printf("%s Bytes written: %d,\n reply:\n%s\n", t_id, written, reply);
 						free((char*)reply);
 					}
 				} catch (register_server_exception &ex) {
@@ -641,13 +635,15 @@ printf("New SSL session needed\n");
 			}
 		}
 
-printf(">> Adding client %d back to connections_fd\n", client->socket);
+		printf("%s Adding client %d back to connections_fd\n", t_id, client->socket);
 		client->last_used = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 		client->active = false;
 		active_threads--;
-connections_fd_mutex.lock();
+		
+		connections_fd_mutex.lock();
 		FD_SET(client->socket, &connections_fd);
-connections_fd_mutex.unlock();
+		connections_fd_mutex.unlock();
+		
 		write(control, control_buf, 1);
 		
 	}

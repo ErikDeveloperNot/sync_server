@@ -63,21 +63,25 @@ std::string sync_handler::handle_register(std::string& request)
 {
 //	printf("request:\n%s\n", request.c_str());
 	jsonP_parser parser{};
-	jsonP_doc *doc = nullptr;
+	jsonP_doc *pDoc = nullptr;
+	element_object *doc = nullptr;
 	std::string email;
 	std::string password;
 	
 	try {
-		doc = parser.parse(request);
+		pDoc = parser.parse(request);
+		doc = pDoc->get_object();
 		email = doc->get_as_string("email");
 		password = doc->get_as_string("password");
 	} catch (jsonP_exception &ex) {
 		printf("Error parsing register message: %s\n", ex.what());
 		delete doc;
+		delete pDoc;
 		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
 	}
 	
 	delete doc;
+	delete pDoc;
 	
 	if (!verify_email(email)) {
 		std::string error{"{ error: \"Invalid Email\" }"};
@@ -125,7 +129,7 @@ std::string sync_handler::handle_register(std::string& request)
 	}
 	
 	std::string prot{"https"};
-	jsonP_doc d{};
+	element_object d{};
 	d.add_element("bucket", new element_string{"PassvaultServiceRegistration/service/sync-accounts"});
 	d.add_element("port", new element_numeric{config->getBindPort()});
 	d.add_element("protocol", new element_string{prot});
@@ -141,7 +145,7 @@ std::string sync_handler::handle_register(std::string& request)
 
 std::string sync_handler::handle_config()
 {
-	jsonP_doc doc{};
+	element_object doc{};
 	doc.add_element("bucket", new element_string{"PassvaultServiceRegistration/service/sync-accounts"});
 	doc.add_element("password", new element_string{"xxx"});
 	doc.add_element("port", new element_numeric{config->getBindPort()});
@@ -160,21 +164,25 @@ std::string sync_handler::handle_delete(std::string& request)
 //	printf("request:\n%s\n", request.c_str());
 
 	jsonP_parser parser{};
-	jsonP_doc *doc = nullptr;
+	jsonP_doc *pDoc = nullptr;
+	element_object *doc = nullptr;
 	std::string email;
 	std::string password;
 	
 	try {
-		doc = parser.parse(request);
+		pDoc = parser.parse(request);
+		doc = pDoc->get_object();
 		email = doc->get_as_string("user");
 		password = doc->get_as_string("password");
 	} catch (jsonP_exception &ex) {
 		printf("Error parsing delete message: %s\n", ex.what());
 		delete doc;
+		delete pDoc;
 		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
 	}
 
 	delete doc;
+	delete pDoc;
 //	long long current_t = lock_user(registerConfigReq.email);
 	
 	if (!verify_password(email, password)) {
@@ -203,26 +211,29 @@ std::string sync_handler::handle_sync_initial(std::string& request)
 //	printf("Sync Initial:\n%s\n", request.c_str());
 
 	jsonP_parser parser{};
-	jsonP_doc *doc = nullptr;
-	jsonP_doc *resp_doc = nullptr;
+	jsonP_doc *pDoc = nullptr;
+	element_object *doc = nullptr;
+	element_object *resp_doc = nullptr;
 	element_array *sendAccountsToServerList = nullptr;
 	element_array *accountsToSendBackToClient = nullptr;
 	std::string email;
 	std::string password;
 	
 	try {
-		doc = parser.parse(request);
+		pDoc = parser.parse(request);
+		doc = pDoc->get_object();
 		email = doc->get_as_string("user");
 		password = doc->get_as_string("password");
 		
 		if (!verify_password(email, password)) {
 			delete doc;
+			delete pDoc;
 			throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 		}
 		
 		sendAccountsToServerList = new element_array{string};
 		accountsToSendBackToClient = new element_array{object};
-		resp_doc = new jsonP_doc{};
+		resp_doc = new element_object{};
 		resp_doc->add_element("lockTime", new element_numeric{current_time_sec()});
 		resp_doc->add_element("responseCode", new element_numeric{0});
 
@@ -278,12 +289,14 @@ std::string sync_handler::handle_sync_initial(std::string& request)
 
 		delete doc;
 		delete resp_doc;
+		delete pDoc;
 		return s;
 		
 	} catch (jsonP_exception &ex) {
 		printf("Error parsing sync initial message: %s\n", ex.what());
 		delete doc;
 		delete resp_doc;
+		delete pDoc;
 		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
 	}
 }
@@ -293,12 +306,14 @@ std::string sync_handler::handle_sync_final(std::string& request)
 {
 //	printf("SYNC FINAL:\n%s\n", request.c_str());
 	jsonP_parser parser{};
-	jsonP_doc *doc = nullptr;
+	jsonP_doc *pDoc = nullptr;
+	element_object *doc = nullptr;
 	std::string user;
 	std::vector<Account> accounts;
 	
 	try {
-		doc = parser.parse(request);
+		pDoc = parser.parse(request);
+		doc = pDoc->get_object();
 		user = doc->get_as_string("user");
 		
 		if (!verify_password(user, doc->get_as_string("password"))) {
@@ -313,9 +328,11 @@ std::string sync_handler::handle_sync_final(std::string& request)
 		}
 		
 		delete doc;
+		delete pDoc;
 		
 	} catch (jsonP_exception &ex) {
 		delete doc;
+		delete pDoc;
 		printf("Parse error in sync final message: %s\n", ex.what());
 		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}

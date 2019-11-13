@@ -81,6 +81,7 @@ server::server(Config *conf)
 	listen_sd = startListener(config);
 	max_fd = listen_sd;
 	FD_SET(listen_sd, &connection_fds);
+	read_fds_called = false;
 	
 	printf("\n\n");
 	printf("Server fd: %d, max connections: %d\n", listen_sd, max_connections);
@@ -138,17 +139,21 @@ void server::start()
 		} else {
 			printf("max_fd = %d\n", max_fd);
 			if (FD_ISSET(control[0], &read_fds)) {
-				printf(">>>>>>>>>>>>> CONTROL %d was modified\n", control[0]);
+				printf(">>>>>>>>>>>>> Re-read fds CONTROL %d was modified\n", control[0]);
+connection_fds_mutex.lock();
 				fgets(control_buf, 2, control_file);
-				
+read_fds_called = false;
+connection_fds_mutex.unlock();
+		
 				if (rv == 1)
 					continue;
 				else
 					served++;
 			}
-			
+		
 			if (FD_ISSET(control2[0], &read_fds)) {
-				printf(">>>>>>>>>>>>> CONTROL2 %d was modified\n", control2[0]);
+				printf(">>>>>>>>>>>>> Close clients CONTROL %d was modified\n", control2[0]);
+//clients_to_close_mux.lock();
 				fgets(control2_buf, 2, control2_file);
 				served++;
 				
@@ -174,7 +179,7 @@ void server::start()
 
 				if (client > max_fd)
 					max_fd = client;
-						
+					
 				conn_map[client] = conn_meta(client, NULL, current_time_sec(), true);   //revisit time if I use this field
 				current_connections++;
 				service_mutex.lock();
@@ -193,7 +198,7 @@ void server::start()
 					break;
 				}
 				
-				if (i == control[0] || i == listen_sd)
+				if (i == control[0] || i == listen_sd || i == control2[0])
 					continue;
 					
 				if (FD_ISSET(i, &read_fds)) {
@@ -204,7 +209,7 @@ void server::start()
 							
 					int n = 0;
 					ioctl(i, FIONREAD, &n);
-						
+
 					if (n == 0) {
 						close_client(i, conn_map[i].ssl, connection_fds, connection_fds_mutex);
 						current_connections--;
@@ -350,9 +355,13 @@ void server::close_clients(std::vector<int> clients)
 	connection_fds_mutex.unlock();
 	
 	for (auto &val : clients) {
-		if (conn_map.count(val) > 0) {
+//		if (conn_map.count(val) > 0) {
+if (conn_map.count(val) > 0 && !conn_map[val].active) {
+printf("SSL_free: \n");
+//if (!conn_map[val].ssl)		
 			SSL_free(conn_map[val].ssl);
 			close(val);
+
 			current_connections--;
 			conn_map.erase(val);
 			printf("client %d should be closed\n", val);
@@ -374,14 +383,17 @@ void server::start_client_seesion_manager()
 				clients_to_close_mux.lock();
 				
 				for (int i{0}; i <= max_fd; i++) {
-					if (conn_map.count(i) > 0 && !conn_map[i].active && current_time - conn_map[i].last_used >= keep_alive) 
+					if (conn_map.count(i) > 0 && !conn_map[i].active && conn_map[i].socket > 0 && 
+												current_time - conn_map[i].last_used >= keep_alive) 
 						clients_to_close.push_back(i);
 				}
 				
 				clients_to_close_mux.unlock();
 				
 				if (clients_to_close.size() > 0) {
+clients_to_close_mux.lock();
 					write(control2[1], control2_buf, 1);
+clients_to_close_mux.unlock();
 				}
 			}
 			
@@ -443,7 +455,7 @@ void server::start_service_thread()
 	std::thread t{service_thread, std::ref(service_q), std::ref(service_mutex), 
 						std::ref(cv), ctx, std::ref(current_connections), config, std::ref(infos),
 						std::ref(connection_fds), std::ref(connection_fds_mutex), control[1], std::ref(active_threads), 
-						std::ref(store), std::ref(clients_to_close), std::ref(clients_to_close_mux), control2[1]};
+						std::ref(store), std::ref(read_fds_called)}; //, std::ref(clients_to_close), std::ref(clients_to_close_mux), control2[1]};
 	
 		std::stringstream ss;
 		ss << t.get_id();
@@ -502,15 +514,21 @@ void server::start_service_thread_manager()
 bool verify_request(std::string &method, std::string &operation);
 bool read_incoming_bytes(SSL *, std::string &msg, int contentLenth);
 bool parse_header(std::string &header, std::string &operation, std::string &contentLenth, request_type &requestType);
-void close_client(conn_meta *, std::mutex &, std::vector<int> &, int, char *);
+//void close_client(conn_meta *, std::mutex &, std::atomic_int &, std::vector<int> &, int, char *);
+void close_client(conn_meta *, std::atomic_int &);
 
 // definition of service thread-
+//void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
+//					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
+//					 std::map<std::string, User_info> & infos, fd_set & connections_fd, 
+//					 std::mutex &connections_fd_mutex, int control, std::atomic_int & active_threads, 
+//					 data_store_connection &store, std::vector<int> &clients_to_close, std::mutex &clients_to_close_mux,
+//					 int clients_to_close_control)
 void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
 					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
 					 std::map<std::string, User_info> & infos, fd_set & connections_fd, 
 					 std::mutex &connections_fd_mutex, int control, std::atomic_int & active_threads, 
-					 data_store_connection &store, std::vector<int> &clients_to_close, std::mutex &clients_to_close_mux,
-					 int clients_to_close_control)
+					 data_store_connection &store, std::atomic_bool & read_fds_called)
 {
 	std::thread::id id = std::this_thread::get_id();
 	std::stringstream ss;
@@ -542,8 +560,7 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 				});
 			
 			active_threads++;
-			printf(">>%s going to work\n", t_id);
-
+			
 			if (q.front()->last_used ==  END_IT) {
 				printf("Thread %s shutting down\n", t_id);
 				q.pop();
@@ -553,6 +570,8 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 //				printf(" value: %d\n", client);
 				q.pop();
 			}
+			
+			printf(">>%s going to work for client fd: %d\n", t_id, client->socket);
 		}
 		
 		
@@ -568,7 +587,8 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 				ssl_errros = true;
 				ERR_print_errors_fp(stderr);
 				// dont add client socket back to master FDset, let cleaner thread remove the connection
-				close_client(client, clients_to_close_mux, clients_to_close, clients_to_close_control, control_buf);
+//				close_client(client, clients_to_close_mux, connections, clients_to_close, clients_to_close_control, control_buf);
+				close_client(client, connections);
 				active_threads--;
 				continue;
 			}
@@ -628,10 +648,17 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 					printf("\n%s: Error:\nHeader\n%s\nRequest\n%s\nError\n%s\n", t_id, 
 							header.c_str(), request.c_str(), ex.what());
 					SSL_write(client->ssl, ex.what(), strlen(ex.what()));
-					close_client(client, clients_to_close_mux, clients_to_close, clients_to_close_control, control_buf);
+//					close_client(client, clients_to_close_mux, connections, clients_to_close, clients_to_close_control, control_buf);
+					close_client(client, connections);
 					active_threads--;
 					continue;
 				}
+			} else {
+				printf("%s: Error trying to read header, no bytes read, closing client\n", t_id);
+//				close_client(client, clients_to_close_mux, connections, clients_to_close, clients_to_close_control, control_buf);
+				close_client(client, connections);
+				active_threads--;
+				continue;
 			}
 		}
 
@@ -642,9 +669,15 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 		
 		connections_fd_mutex.lock();
 		FD_SET(client->socket, &connections_fd);
+		
+if (!read_fds_called) {
+	read_fds_called = true;
+	write(control, control_buf, 1);
+}
+		
 		connections_fd_mutex.unlock();
 		
-		write(control, control_buf, 1);
+//		write(control, control_buf, 1);
 		
 	}
 	
@@ -739,13 +772,21 @@ bool parse_header(std::string &header, std::string &operation, std::string &cont
 }
 
 
-void close_client(conn_meta *client, std::mutex &clients_to_close_mux, std::vector<int> &clients_to_close, 
-					int clients_to_close_control, char *control_buf)
+//void close_client(conn_meta *client, std::mutex &clients_to_close_mux, std::atomic_int &connections, 
+//					std::vector<int> &clients_to_close, int clients_to_close_control, char *control_buf)
+void close_client(conn_meta *client, std::atomic_int &connections)
 {
-	client->active = false;
-	client->last_used = 1;
-	clients_to_close_mux.lock();
-	clients_to_close.push_back(client->socket);
-	clients_to_close_mux.unlock();
-	write(clients_to_close_control, control_buf, 1);
+int s = client->socket;
+client->socket = -1;
+	SSL_free(client->ssl);
+	close(s);
+//	client->socket = -1;
+	connections--;
+	
+//	client->active = false;
+//	client->last_used = 1;
+//	clients_to_close_mux.lock();
+//	clients_to_close.push_back(client->socket);
+//	clients_to_close_mux.unlock();
+//	write(clients_to_close_control, control_buf, 1);
 }

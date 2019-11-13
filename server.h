@@ -64,6 +64,7 @@ private:
 	fd_set connection_fds;
 	fd_set read_fds;
 	std::mutex connection_fds_mutex;
+	std::atomic_bool read_fds_called;
 	int rv;
 	int served;
 	int max_connections;
@@ -104,8 +105,8 @@ public:
 void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
 					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
 					 std::map<std::string, User_info> &, fd_set &, std::mutex &fd_set_mutex, int, 
-					 std::atomic_int &active_threads, data_store_connection &store, std::vector<int> &, std::mutex &,
-					 int);
+					 std::atomic_int &active_threads, data_store_connection &store, std::atomic_bool &read_fds_called); /*, std::vector<int> &, std::mutex &,
+					 int);*/
 
 
 

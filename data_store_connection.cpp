@@ -249,10 +249,12 @@ bool data_store_connection::createUser(User& user)
 
 bool data_store_connection::update_last_sync_for_user(std::string& user, long long lockTime)
 {
+//printf("UPDATE_LAST_SYNC_FOR_USER_1, user: %s, time: %lld\n", user.c_str(), lockTime);
 	bool success{true};
 	const char *values[2];
 	values[0] = std::to_string(lockTime).c_str();
 	values[1] = user.c_str();
+//printf("UPDATE_LAST_SYNC_FOR_USER_2, user: %s, time: %s\n", values[1], values[0]);
 	
 	try {
 		PGresult *res = PQexecPrepared_wrapper(update_last_sync_time_pre, values, 2);
@@ -264,6 +266,7 @@ bool data_store_connection::update_last_sync_for_user(std::string& user, long lo
 	}
 	
 	return success;
+//return true;
 }
 
 
@@ -316,6 +319,9 @@ PGresult* data_store_connection::PQexecPrepared_wrapper(const char* pre, const c
 				connections_cv.notify_one();
 				PQfinish(conn);
 			}
+else {
+	release_connection(conn);
+}
 			//reset_connection(conn);
 		} else {
 			release_connection(conn);
@@ -360,6 +366,9 @@ PGresult* data_store_connection::PQexec_wrapper(const char* sql)
 				connections_cv.notify_one();
 				PQfinish(conn);
 			}
+else {
+	release_connection(conn);
+}
 		} else {
 			success = true;
 			release_connection(conn);

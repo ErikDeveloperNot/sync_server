@@ -65,7 +65,11 @@
 server::server(Config *conf)
 {
 	config = conf;
-
+	
+	// set sockop rw_to timeout to 15 seconds
+	rw_to.tv_sec = 15;
+	rw_to.tv_usec = 0;
+	
 	FD_ZERO(&connection_fds);
 	FD_ZERO(&read_fds);
 	max_connections = config->getServerMaxConnections();
@@ -289,9 +293,6 @@ int server::startListener(Config *config)
 	int yes{1};
 	setsockopt(sd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
 	// set socket read/write timeout
-	timeval rw_to;
-	rw_to.tv_sec = 15;
-	rw_to.tv_usec = 0;
 	setsockopt(sd, SOL_SOCKET, SO_RCVTIMEO, &rw_to, sizeof(timeval));
 	setsockopt(sd, SOL_SOCKET, SO_SNDTIMEO, &rw_to, sizeof(timeval));
 	

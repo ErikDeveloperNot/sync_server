@@ -71,6 +71,9 @@ private:
 	int listen_sd;
 	int max_fd;
 	
+	// set socket read/write timeout
+	timeval rw_to;
+	
 	// variables for file descriptor used by service threads
 	int control[2];
 	char control_buf[10];
@@ -82,6 +85,7 @@ private:
 	FILE *control2_file;
 	std::vector<int> clients_to_close;
 	std::mutex clients_to_close_mux;
+	
 	
 	int startListener(Config *config);
 	void handleServerBusy(int);

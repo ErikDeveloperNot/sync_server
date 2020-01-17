@@ -1,5 +1,4 @@
 #include "sync_handler.h"
-#include "jsonP_parser.h"
 #include "register_server_exception.h"
 
 #include "openssl/evp.h"
@@ -11,7 +10,7 @@
 
 
 sync_handler::sync_handler(const std::string &thread_id, Config *config, 
-							std::map<std::string, User_info> &user_infos, data_store_connection &store) :
+							std::map<char *, User_info, cmp_key> &user_infos, data_store_connection &store) :
 t_id{thread_id},
 store{store},
 config{config},
@@ -35,23 +34,23 @@ sync_handler::~sync_handler()
 }
 
 
-std::string sync_handler::handle_request(std::string &resource, std::string &request, request_type http_type)
+char * sync_handler::handle_request(operation_type op_type, char *request, request_type http_type)
 {
 	try {
-		if (resource == REGISTER_CONFIG) {
+		if (op_type == register_config) {
 			if (http_type == request_type::POST) {
 				return handle_register(request);
 			} else {
 				return handle_config();
 			}
-		} else if (resource == DELETE_USER) {
+		} else if (op_type == delete_user) {
 			return handle_delete(request);
-		} else if (resource == SYNC_INITIAL) {
+		} else if (op_type == sync_initial) {
 			return handle_sync_initial(request);
-		} else if (resource == SYNC_FINAL) {
+		} else if (op_type == sync_final) {
 			return handle_sync_final(request);
 		} else {
-			return "{ error: \"Bad Request\" }";;
+			return bad_request;
 		}
 	} catch (const char *error) {
 		throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
@@ -59,54 +58,47 @@ std::string sync_handler::handle_request(std::string &resource, std::string &req
 }
 
 
-std::string sync_handler::handle_register(std::string& request)
+char * sync_handler::handle_register(char *request)
 {
 //	printf("request:\n%s\n", request.c_str());
-	jsonP_parser parser{};
-	jsonP_doc *pDoc = nullptr;
-	element_object *doc = nullptr;
-	std::string email;
-	std::string password;
+	jsonP_parser parser{request, (unsigned int)strlen(request), PRESERVE_JSON};  // <-- REMOVE PRESERVE LATER
+	jsonP_json *pDoc = nullptr;
+	const char *email;
+	const char *password;
 	
 	try {
-		pDoc = parser.parse(request);
-		doc = pDoc->get_object();
-		email = doc->get_as_string("email");
-		password = doc->get_as_string("password");
+		pDoc = parser.parse();
+		email = pDoc->get_string_value(email_path, delim, &jsonP_err);
+		password = pDoc->get_string_value(pass_path, delim, &jsonP_err);
 	} catch (jsonP_exception &ex) {
 		printf("Error parsing register message: %s\n", ex.what());
-		delete doc;
 		delete pDoc;
 		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
 	}
 	
-	delete doc;
-	delete pDoc;
-	
 	if (!verify_email(email)) {
-		std::string error{"{ error: \"Invalid Email\" }"};
+		char error[] = {"{ error: \"Invalid Email\" }"};
 		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con, error)};
 	}
 	
 	//hash password
-	std::string hashedPassword = password;
-	
-	if (!hash_password(hashedPassword)) {
-		printf("Failed to hash password for user: %s\npass: %s\n", email.c_str(), password.c_str());
+	char hashedPassword[1024];
+
+	if (!hash_password(password, hashedPassword)) {
+		printf("Failed to hash password for user: %s\npass: %s\n", email, password);
 	}
 	
 	long long current_t = current_time_ms();
 	//create the account
 	User user{email, hashedPassword, 1L};
-	User_info userInfo{user, current_t};
 		
 	//lock and check for account
 	user_infos_lock.lock();
 	
 //debug_user_infos();	
 	
-	if (user_infos.count(email) < 1) {
-		user_infos[user.account_uuid] = userInfo;
+	if (user_infos.count((char*)email) < 1) {
+		user_infos[user.account_uuid] = User_info{user, current_t};
 		user_infos_lock.unlock();
 		user_infos_cv.notify_one();
 
@@ -128,61 +120,59 @@ std::string sync_handler::handle_register(std::string& request)
 		throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 	}
 	
-	std::string prot{"https"};
-	element_object d{};
-	d.add_element("bucket", new element_string{"PassvaultServiceRegistration/service/sync-accounts"});
-	d.add_element("port", new element_numeric{config->getBindPort()});
-	d.add_element("protocol", new element_string{prot});
-	d.add_element("userName", new element_string{email});
-	d.add_element("password", new element_string{password});
-	d.add_element("server", new element_string{config->getBindAddress()});
-	std::string s;
-	d.stringify(s);
+	long p = config->getBindPort();
+	jsonP_json d{object, 6, 512, DONT_SORT_KEYS};
+	d.add_value_type(string, 0, bucket_key, sync_path);
+	d.add_value_type(numeric_long, 0, port_key, &p);
+	d.add_value_type(string, 0, protocol_key, proto);
+	d.add_value_type(string, 0, user_key, (char*)email);
+	d.add_value_type(string, 0, pass_key, (char*)password);
+	d.add_value_type(string, 0, server_key, (char*)config->getBindAddress());
+
+	delete pDoc;
 	
-	return s;
+	return d.stringify();
 }
 
 
-std::string sync_handler::handle_config()
+char * sync_handler::handle_config()
 {
-	element_object doc{};
-	doc.add_element("bucket", new element_string{"PassvaultServiceRegistration/service/sync-accounts"});
-	doc.add_element("password", new element_string{"xxx"});
-	doc.add_element("port", new element_numeric{config->getBindPort()});
-	doc.add_element("protocol", new element_string{"https"});
-	doc.add_element("server", new element_string{config->getBindAddress()});
-	doc.add_element("userName", new element_string{"xxx@xxx.com"});
-	std::string s;
-	doc.stringify(s);
+	long p = config->getBindPort();
+	char email[] = {"xxx@xxx.com"};
+	char password[] = {"xxx"};
+	jsonP_json d{object, 6, 512, DONT_SORT_KEYS};
+	d.add_value_type(string, 0, bucket_key, sync_path);
+	d.add_value_type(numeric_long, 0, port_key, &p);
+	d.add_value_type(string, 0, protocol_key, proto);
+	d.add_value_type(string, 0, user_key, email);
+	d.add_value_type(string, 0, pass_key, password);
+	d.add_value_type(string, 0, server_key, (char*)config->getBindAddress());
 
-	return s;
+	return d.stringify();
 }
 
 
-std::string sync_handler::handle_delete(std::string& request)
+char * sync_handler::handle_delete(char *request)
 {
 //	printf("request:\n%s\n", request.c_str());
-
-	jsonP_parser parser{};
-	jsonP_doc *pDoc = nullptr;
-	element_object *doc = nullptr;
-	std::string email;
-	std::string password;
+	jsonP_parser parser{request, (unsigned int)strlen(request), PRESERVE_JSON};  // <-- REMOVE PRESERVE LATER
+	jsonP_json *pDoc = nullptr;
+	const char *email;
+	const char *password;
 	
 	try {
-		pDoc = parser.parse(request);
-		doc = pDoc->get_object();
-		email = doc->get_as_string("user");
-		password = doc->get_as_string("password");
+		pDoc = parser.parse();
+		email = pDoc->get_string_value(user_path, delim, &jsonP_err);
+		password = pDoc->get_string_value(pass_path, delim, &jsonP_err);
+
+//printf("**** EMAIL: %s, PASSWORD: %s\n", email, password);
 	} catch (jsonP_exception &ex) {
 		printf("Error parsing delete message: %s\n", ex.what());
-		delete doc;
 		delete pDoc;
 		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
 	}
 
-	delete doc;
-	delete pDoc;
+	
 //	long long current_t = lock_user(registerConfigReq.email);
 	
 	if (!verify_password(email, password)) {
@@ -190,168 +180,186 @@ std::string sync_handler::handle_delete(std::string& request)
 		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
-	if (!store.delete_user(user_infos[email].user)) {
-		printf("Error deleting account %s from the database\n", email.c_str());
+	if (!store.delete_user(user_infos[(char*)email].user)) {
+		printf("Error deleting account %s from the database\n", email);
 //		unlock_user(registerConfigReq.email, current_t);
 		throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 	}
 	
 	user_infos_lock.lock();
-//	user_infos.erase(registerConfigReq.email);
-	user_infos.erase(email);
+	char *id = user_infos[(char*)email].user.account_uuid;
+	char *pass = user_infos[(char*)email].user.account_password;
+	user_infos.erase((char*)email);
+	free(id);
+	free(pass);	
 	user_infos_lock.unlock();
 	user_infos_cv.notify_one();
 	
-	return "{ msg: \"Account has been deleted\" }";
+	delete pDoc;
+	
+	return account_deleted;
 }
 
 
-std::string sync_handler::handle_sync_initial(std::string& request)
+char * sync_handler::handle_sync_initial(char *request)
 {
 //	printf("Sync Initial:\n%s\n", request.c_str());
 
-	jsonP_parser parser{};
-	jsonP_doc *pDoc = nullptr;
-	element_object *doc = nullptr;
-	element_object *resp_doc = nullptr;
-	element_array *sendAccountsToServerList = nullptr;
-	element_array *accountsToSendBackToClient = nullptr;
-	std::string email;
-	std::string password;
+	jsonP_parser parser{request, (unsigned int)strlen(request), PRESERVE_JSON};    //<--- REMOVE LATER
+	jsonP_json *pDoc = nullptr;
+//	char *heap = NULL;
+	Heap_List heap{};
+	const char *email;
+	const char *password;
 	
 	try {
-		pDoc = parser.parse(request);
-		doc = pDoc->get_object();
-		email = doc->get_as_string("user");
-		password = doc->get_as_string("password");
-		
+		pDoc = parser.parse();
+		email = pDoc->get_string_value(user_path, delim, &jsonP_err);
+		password = pDoc->get_string_value(pass_path, delim, &jsonP_err);
+
 		if (!verify_password(email, password)) {
-			delete doc;
 			delete pDoc;
 			throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 		}
 		
-		sendAccountsToServerList = new element_array{string};
-		accountsToSendBackToClient = new element_array{object};
-		resp_doc = new element_object{};
-		resp_doc->add_element("lockTime", new element_numeric{current_time_sec()});
-		resp_doc->add_element("responseCode", new element_numeric{0});
-
-		std::map<std::string, Account> accounts = store.get_accounts_for_user(email);
-		std::string account_name;
+		long cts = current_time_sec();
+		jsonP_json resp_doc{object, 4, 1024, DONT_SORT_KEYS};
+		resp_doc.add_value_type(numeric_long, 0, responseCode_key, &default_response_code);
+		resp_doc.add_value_type(numeric_long, 0, lockTime_key, &cts);
+		std::map<char*, Account, cmp_key> accounts = store.get_accounts_for_user(email, &heap);
+		char *account_name;
+		
+		object_id sendAccountsToServerList = resp_doc.add_container(sendAccountsToServerList_key, 5, 0, array);
+		object_id accountsToSendBackToClient = resp_doc.add_container(accountsToSendBackToClient_key, 5, 0, array);
+		
+		unsigned int mem_cnt = pDoc->get_elements_count(accounts_key, delim);
+		const char acct_name_src[] = {"/accounts/%d/accountName"};
+		const char update_time_src[] = {"/accounts/%d/updateTime"};
+		char p_dst[100];
+		error err = none;
 		
 		/*
 		 * for each account sent from client check with store list to see if send back/send to/nothing
 		 */
-		for (element *e : doc->get_as_array("accounts")) {
-			account_name = e->get_as_string("accountName");
+		for (int i=0; i < mem_cnt; i++) {
+//			std::cout << "TYPE: " << get_element_type_string(typ) << ", k_cnt: " << pDoc->get_members_count(*(object_id*)value) << std::endl;
+			sprintf(p_dst, acct_name_src, i);
+			account_name = (char*) pDoc->get_string_value(p_dst, delim, &jsonP_err);
+
 			if (accounts.count(account_name) > 0) {
-				if (e->get_as_numeric_long("updateTime") > accounts[account_name].update_time) {
+				sprintf(p_dst, update_time_src, i);
+				long update_time = pDoc->get_long_value(p_dst, delim, &jsonP_err);
+
+				if (update_time > accounts[account_name].update_time) {
 					//client version more recent - add to client send back to server
-					sendAccountsToServerList->add_element(new element_string{account_name});
-				} else if (accounts[account_name].update_time > e->get_as_numeric_long("updateTime")) {
+					resp_doc.add_value_type(string, sendAccountsToServerList, NULL, account_name);
+				} else if (update_time < accounts[account_name].update_time) {
 					//server version more recent - add to send back to client
-					element_object *obj = new element_object{};
-					obj->add_element("accountName", new element_string{account_name});
-					obj->add_element("deleted", new element_boolean{accounts[account_name].deleted});
-					obj->add_element("password", new element_string{accounts[account_name].password});
-					obj->add_element("oldPassword", new element_string{accounts[account_name].old_password});
-					obj->add_element("updateTime", new element_numeric{long(accounts[account_name].update_time)});
-					obj->add_element("userName", new element_string{accounts[account_name].user_name});
-					obj->add_element("url", new element_string{accounts[account_name].url});
-					accountsToSendBackToClient->add_element(obj);
+					object_id mem_id = resp_doc.add_container(NULL, 7, accountsToSendBackToClient, object);
+					resp_doc.add_value_type(string, mem_id, accountName_key, account_name);
+					resp_doc.add_value_type(((accounts[account_name].deleted) ? bool_true : bool_false), mem_id, deleted_key, NULL);
+					resp_doc.add_value_type(string, mem_id, pass_key, accounts[account_name].password);
+					resp_doc.add_value_type(string, mem_id, oldPass_key, accounts[account_name].old_password);
+					resp_doc.add_value_type(numeric_long, mem_id, updateTime_key, &accounts[account_name].update_time);
+					resp_doc.add_value_type(string, mem_id, user_key, accounts[account_name].user_name);
+					resp_doc.add_value_type(string, mem_id, url_key, accounts[account_name].url);
 				}
 				
 				accounts.erase(account_name);
 			} else {
 				//no version exists on server - add to client send back to server
-				sendAccountsToServerList->add_element(new element_string{account_name});
+				resp_doc.add_value_type(string, sendAccountsToServerList, NULL, account_name);
 			}
 		}
 		
 		//whatever is left in map should be sent back to client
-		for (auto &a : accounts) {
-			element_object *obj = new element_object{};
-			obj->add_element("accountName", new element_string{a.second.account_name});
-			obj->add_element("deleted", new element_boolean{a.second.deleted});
-			obj->add_element("password", new element_string{a.second.password});
-			obj->add_element("oldPassword", new element_string{a.second.old_password});
-			obj->add_element("updateTime", new element_numeric{long(a.second.update_time)});
-			obj->add_element("userName", new element_string{a.second.user_name});
-			obj->add_element("url", new element_string{a.second.url});
-			accountsToSendBackToClient->add_element(obj);
+		for (auto &a : accounts) { 
+			object_id mem_id = resp_doc.add_container(NULL, 7, accountsToSendBackToClient, object);
+			resp_doc.add_value_type(string, mem_id, accountName_key, a.second.account_name);
+			resp_doc.add_value_type(((a.second.deleted) ? bool_true : bool_false), mem_id, deleted_key, NULL);
+			resp_doc.add_value_type(string, mem_id, pass_key, a.second.password);
+			resp_doc.add_value_type(string, mem_id, oldPass_key, a.second.old_password);
+			resp_doc.add_value_type(numeric_long, mem_id, updateTime_key, &a.second.update_time);
+			resp_doc.add_value_type(string, mem_id, user_key, a.second.user_name);
+			resp_doc.add_value_type(string, mem_id, url_key, a.second.url);
 		}
 	
-		resp_doc->add_element("sendAccountsToServerList", sendAccountsToServerList);
-		resp_doc->add_element("accountsToSendBackToClient", accountsToSendBackToClient);
-		std::string s;
-		resp_doc->stringify(s);
-
-		delete doc;
-		delete resp_doc;
 		delete pDoc;
-		return s;
 		
+		return resp_doc.stringify();
 	} catch (jsonP_exception &ex) {
 		printf("Error parsing sync initial message: %s\n", ex.what());
-		delete doc;
-		delete resp_doc;
 		delete pDoc;
 		throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
 	}
 }
 
 
-std::string sync_handler::handle_sync_final(std::string& request)
+char * sync_handler::handle_sync_final(char *request)
 {
 //	printf("SYNC FINAL:\n%s\n", request.c_str());
-	jsonP_parser parser{};
-	jsonP_doc *pDoc = nullptr;
-	element_object *doc = nullptr;
-	std::string user;
+	jsonP_parser parser{request, (unsigned int)strlen(request), PRESERVE_JSON};    //<--- REMOVE LATER
+	jsonP_json *pDoc = nullptr;
+	
 	std::vector<Account> accounts;
+	const char *email;
+	const char *password;
 	
 	try {
-		pDoc = parser.parse(request);
-		doc = pDoc->get_object();
-		user = doc->get_as_string("user");
-		
-		if (!verify_password(user, doc->get_as_string("password"))) {
-			delete doc;
+		pDoc = parser.parse();
+		email = pDoc->get_string_value(user_path, delim, &jsonP_err);
+		password = pDoc->get_string_value(pass_path, delim, &jsonP_err);
+
+		if (!verify_password(email, password)) {
+			delete pDoc;
 			throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 		}
 		
-		for (element *obj : doc->get_as_array("accounts")) {
-			accounts.emplace_back(obj->get_as_string("accountName"), user, obj->get_as_string("userName"),
-				obj->get_as_string("password"), obj->get_as_string("oldPassword"), obj->get_as_string("url"),
-				obj->get_as_numeric_long("updateTime"), obj->get_as_boolean("deleted"));
+		const void *value;
+		object_id id = pDoc->get_object_id(accounts_path, delim);
+		element_type typ = pDoc->get_next_array_element(id, value);
+		
+		while (typ == object) {
+			id = *(object_id*)value;
+			accounts.emplace_back(
+				(char*)pDoc->get_string_value(accountName_key, id, &jsonP_err),
+				(char*)email,
+				(char*)pDoc->get_string_value(user_key, id, &jsonP_err),
+				(char*)pDoc->get_string_value(pass_key, id, &jsonP_err),
+				(char*)pDoc->get_string_value(oldPass_key, id, &jsonP_err),
+				(char*)pDoc->get_string_value(url_key, id, &jsonP_err),
+				pDoc->get_long_value(updateTime_key, id, &jsonP_err),
+				pDoc->get_bool_value(deleted_key, id, &jsonP_err)
+			);
+			
+			typ = pDoc->get_next_array_element(0, value);
 		}
 		
-		delete doc;
-		delete pDoc;
-		
 	} catch (jsonP_exception &ex) {
-		delete doc;
 		delete pDoc;
 		printf("Parse error in sync final message: %s\n", ex.what());
 		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
-	long long relockTime = current_time_sec();
-	
+	long relockTime = current_time_sec();
 	//update store
-	if (store.upsert_accounts_for_user(user, accounts)) {
-		if (!store.update_last_sync_for_user(user, relockTime)) {
-			printf("Failed to update last SyncTime for user: %s in syncFinal\n", user.c_str());
+	if (store.upsert_accounts_for_user((char*)email, accounts)) {
+		if (!store.update_last_sync_for_user(email, relockTime)) {
+			printf("Failed to update last SyncTime for user: %s in syncFinal\n", email);
 			throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 		}
 	} else {
 		//means there was at least 1 failure, so dont update last sync time so another sync can be done
-		printf("Failed to update accounts for user: %s in syncFinal\n", user.c_str());
+		printf("Failed to update accounts for user: %s in syncFinal\n", email);
 		throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 	}
 
-	return "{ msg : \"Sync Final Complete\" }";	
+	delete pDoc;
+	
+//	char *resp = (char*)malloc(strlen(sync_final_resp)+1);
+//	strcpy(resp, sync_final_resp);
+
+	return sync_final_resp;
 }
 
 
@@ -371,23 +379,23 @@ long sync_handler::current_time_sec()
 /*
  *  deprecated -  no longer needed, instead use upsert with on conflict
  */
-long sync_handler::lock_user(std::string& forUser)
+long sync_handler::lock_user(const char *forUser)
 {
 	std::unique_lock<std::mutex> lock(user_infos_lock);
 	
-	if (user_infos.count(forUser) < 1) {
+	if (user_infos.count((char*)forUser) < 1) {
 		lock.unlock();
 		user_infos_cv.notify_one();
 		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
-	if (!user_infos[forUser].cv_vector.empty()) {
-		printf("%s - waiting for lock for user: %s\n", t_id.c_str(), forUser.c_str());
+	if (!user_infos[(char*)forUser].cv_vector.empty()) {
+		printf("%s - waiting for lock for user: %s\n", t_id.c_str(), forUser);
 //		auto sec = std::chrono::seconds(30);
 		
 		// add hndler/thread cond variable to user queue, release user_info_lock and wait on cv. TODO - add timeout later
 		std::unique_lock<std::mutex> temp_lock(handler_mutex);
-		user_infos[forUser].cv_vector.push_back(&handler_cv);
+		user_infos[(char*)forUser].cv_vector.push_back(&handler_cv);
 		lock.unlock();
 		user_infos_cv.notify_one();
 		
@@ -404,20 +412,20 @@ long sync_handler::lock_user(std::string& forUser)
 //		})) {}
 
 		handler_cv.wait(temp_lock);
-		printf("%s - notified waiting for %s\n", t_id.c_str(), forUser.c_str());
+		printf("%s - notified waiting for %s\n", t_id.c_str(), forUser);
 		lock.lock();
 		
 		//should never see this
-		if (user_infos[forUser].cv_vector[0] != &handler_cv) {
-			printf("%s - %s notified but wrong cv is in front\n", t_id.c_str(), forUser.c_str());
+		if (user_infos[(char*)forUser].cv_vector[0] != &handler_cv) {
+			printf("%s - %s notified but wrong cv is in front\n", t_id.c_str(), forUser);
 			
-			std::vector<std::condition_variable *>::iterator it = user_infos[forUser].cv_vector.begin();
-			for (; it != user_infos[forUser].cv_vector.end(); it++)
+			std::vector<std::condition_variable *>::iterator it = user_infos[(char*)forUser].cv_vector.begin();
+			for (; it != user_infos[(char*)forUser].cv_vector.end(); it++)
 				if (*it == &handler_cv)
 					break;
 					
-			if (it != user_infos[forUser].cv_vector.end())
-				user_infos[forUser].cv_vector.erase(it);
+			if (it != user_infos[(char*)forUser].cv_vector.end())
+				user_infos[(char*)forUser].cv_vector.erase(it);
 			
 			lock.unlock();
 			user_infos_cv.notify_one();
@@ -430,7 +438,7 @@ long sync_handler::lock_user(std::string& forUser)
 //			throw register_server_exception{configHttp.build_reply(HTTP_503, close_con)};
 //		}
 	} else {
-		user_infos[forUser].cv_vector.push_back(&handler_cv);
+		user_infos[(char*)forUser].cv_vector.push_back(&handler_cv);
 	}
 
 
@@ -474,7 +482,7 @@ long sync_handler::lock_user(std::string& forUser)
 //		}
 //	}
 	
-	user_infos[forUser].lock_time = current_lock;
+	user_infos[(char*)forUser].lock_time = current_lock;
 	lock.unlock();
 	user_infos_cv.notify_one();
 	
@@ -485,12 +493,12 @@ long sync_handler::lock_user(std::string& forUser)
 /*
  *  deprecated -  no longer needed, instead use upsert with on conflict
  */
-long sync_handler::relock_user(std::string& forUser, long userLock)
+long sync_handler::relock_user(const char *forUser, long userLock)
 {
 	long toReturn{0};
 	std::unique_lock<std::mutex> lock(user_infos_lock);
 	
-	if (user_infos.count(forUser) < 1) {
+	if (user_infos.count((char*)forUser) < 1) {
 		lock.unlock();
 		user_infos_cv.notify_one();
 
@@ -498,12 +506,12 @@ long sync_handler::relock_user(std::string& forUser, long userLock)
 		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
-	if (userLock != user_infos[forUser].lock_time) {
+	if (userLock != user_infos[(char*)forUser].lock_time) {
 		//slow client or server, fail
 		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	} else {
 		toReturn = current_time_sec();
-		user_infos[forUser].lock_time = toReturn;
+		user_infos[(char*)forUser].lock_time = toReturn;
 	}
 	
 	lock.unlock();
@@ -515,15 +523,15 @@ long sync_handler::relock_user(std::string& forUser, long userLock)
 /*
  *  deprecated -  no longer needed, instead use upsert with on conflict
  */
-void sync_handler::unlock_user(std::string& forUser, long lockTime)
+void sync_handler::unlock_user(const char *forUser, long lockTime)
 {
 	user_infos_lock.lock();
 //	user_infos[forUser].lock_time = 0;
 	
-	if (lockTime != user_infos[forUser].lock_time) {
-		printf("%s - Tried to unlock for user: %s, but locktimes dont match\n", t_id.c_str(), forUser.c_str());
+	if (lockTime != user_infos[(char*)forUser].lock_time) {
+		printf("%s - Tried to unlock for user: %s, but locktimes dont match\n", t_id.c_str(), forUser);
 	} else {
-		user_infos[forUser].lock_time = 0;
+		user_infos[(char*)forUser].lock_time = 0;
 	
 	
 //	std::vector<std::condition_variable *>::iterator it = user_infos[forUser].cv_vector.begin();
@@ -539,11 +547,11 @@ void sync_handler::unlock_user(std::string& forUser, long lockTime)
 //	if (it != user_infos[forUser].cv_vector.end())
 //		user_infos[forUser].cv_vector.erase(it);
 		
-		if (!user_infos[forUser].cv_vector.empty()) {
-			user_infos[forUser].cv_vector.erase(user_infos[forUser].cv_vector.begin());
+		if (!user_infos[(char*)forUser].cv_vector.empty()) {
+			user_infos[(char*)forUser].cv_vector.erase(user_infos[(char*)forUser].cv_vector.begin());
 			
-			if (!user_infos[forUser].cv_vector.empty()) 
-				user_infos[forUser].cv_vector[0]->notify_one();
+			if (!user_infos[(char*)forUser].cv_vector.empty()) 
+				user_infos[(char*)forUser].cv_vector[0]->notify_one();
 		}
 	}
 	
@@ -555,20 +563,27 @@ void sync_handler::unlock_user(std::string& forUser, long lockTime)
 void sync_handler::debug_user_infos()
 {
 	for (auto &k : user_infos) {
-		printf("%s, %lld\n", k.first.c_str(), user_infos[k.first].lock_time);
+		printf("%s, %lld\n", k.first, user_infos[k.first].lock_time);
 	}
 }
 
 
-bool sync_handler::verify_password(std::string & user, std::string & pw)
+//bool sync_handler::verify_password(std::string & user, std::string & pw)
+bool sync_handler::verify_password(const char *user, const char *pw)
 {
-	if (!hash_password(pw)) {
-		printf("Unable to hash password %s for account %s\n", pw.c_str(), user.c_str());
+	if (user_infos.count((char*)user) < 1)
+		return false;
+		
+	char hashed[1024];
+//	hash_password(pw, hashed);
+	
+//	if (!hash_password(pw)) {
+	if (!hash_password(pw, hashed)) {
+		printf("Unable to hash password %s for account %s\n", pw, user);
 		return false;
 	}
-	
-	if (pw != user_infos[user].user.account_password) {
-		printf("Invalid password %s for account %s\n", pw.c_str(), user.c_str());
+	if (strcmp(user_infos[(char*)user].user.account_password, hashed) != 0) {
+		printf("Invalid password %s for account %s\n", pw, user);
 		return false;
 	}
 	
@@ -577,14 +592,16 @@ bool sync_handler::verify_password(std::string & user, std::string & pw)
 
 
 //will not allow quoted labels or bracketed domains or ip domains
-bool sync_handler::verify_email(std::string& email)
+bool sync_handler::verify_email(const char *email) //std::string& email)
 {
+	size_t email_len = strlen(email);
 	bool local_valid{false};
 	int local_l_max{64};
 	char last_char = '.';
 	int i{0};
 
-	for ( ; i < email.length(); i++) {
+//	for ( ; i < email.length(); i++) {
+	for ( ; i < email_len; i++) {
 		char c = email[i];
 		
 		if (c == '@') {
@@ -618,7 +635,8 @@ bool sync_handler::verify_email(std::string& email)
 	
 	last_char = '.';
 
-	for ( ; i < email.length(); i++, domain_length++, label_length++) {
+//	for ( ; i < email.length(); i++, domain_length++, label_length++) {
+	for ( ; i < email_len; i++, domain_length++, label_length++) {
 		char c = email[i];
 
 		if (domain_length > domain_l_max || label_length > label_l_max || c == '@')
@@ -658,11 +676,10 @@ bool sync_handler::verify_email(std::string& email)
 }
 
 
-bool sync_handler::hash_password(std::string &password)
+bool sync_handler::hash_password(const char *password, char *hashed)
 {
 	// start message digest
-	const char *c_password = password.c_str();
-	size_t c_password_len = strlen(c_password);
+	size_t c_password_len = strlen(password);
 	unsigned char *digest = (unsigned char *)malloc(1024 * sizeof(char));
 	unsigned int digest_len;
 	
@@ -678,7 +695,7 @@ bool sync_handler::hash_password(std::string &password)
 		return false;
 	}
 
-	if(1 != EVP_DigestUpdate(mdctx, c_password, c_password_len)) {
+	if(1 != EVP_DigestUpdate(mdctx, password, c_password_len)) {
 		printf("EVP_DigestUpdate error\n");
 		return false;
 	}
@@ -701,26 +718,19 @@ bool sync_handler::hash_password(std::string &password)
 	size_t i;
 	size_t j = 0;
 	//size_t buflen = digest_len * 3;
-	char *q = (char *)malloc((digest_len*2+1) * sizeof(char));
+//	char *q = (char *)malloc((digest_len*2+1) * sizeof(char));
 	const unsigned char *p;
 	
-	if (!q) {
-		printf("Error: Unable to allocate for message digest to HEX\n");
-		return false;
-	}
 	
 	for (i = 0, p = digest; i < digest_len; i++, p++) {
-        q[j++] = hexdig[(*p >> 4) & 0xf];
-		q[j++] = hexdig[*p & 0xf];
+        hashed[j++] = hexdig[(*p >> 4) & 0xf];
+		hashed[j++] = hexdig[*p & 0xf];
 	}
 
-	q[j] = '\0';
+	hashed[j] = '\0';
 	// done HEX encode
 	
-	password = q;
-	
 	free(digest);
-	free(q);
 	
 	return true;
 }

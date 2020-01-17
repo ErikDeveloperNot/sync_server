@@ -4,6 +4,7 @@
 #include <thread>
 #include <chrono>
 #include <ctime>
+#include <cstring>
 
 
 float account_format = 1.00;
@@ -92,10 +93,10 @@ bool data_store_connection::createPreparedStatements(PGconn* conn)
 }
 
 
-bool data_store_connection::prepare(PGconn* conn, const char *prep_name, const std::string &prep_def, int count)
+bool data_store_connection::prepare(PGconn* conn, const char *prep_name, const char *prep_def, int count)
 {
 	bool success{true};
-	PGresult *res = PQprepare(conn, prep_name, prep_def.c_str(), count, NULL);
+	PGresult *res = PQprepare(conn, prep_name, prep_def, count, NULL);
 						
 	if (PQresultStatus(res) != PGRES_COMMAND_OK) {
 		printf("PQprepare %s, failed: %s\n", prep_name, PQerrorMessage(conn));
@@ -147,11 +148,16 @@ std::vector<User> data_store_connection::getAllUsers()
 	std::vector<User> users;
 	
 	try {
-		PGresult *res = PQexec_wrapper(GET_USERS_SQL.c_str());
-			
+		PGresult *res = PQexec_wrapper(GET_USERS_SQL);
+		
 		for (int j = 0; j < PQntuples(res); j++) {
-			users.emplace(users.begin(), std::string{PQgetvalue(res, j, 0)},
-			std::string{PQgetvalue(res, j, 1)}, atoll(PQgetvalue(res, j, 2)));
+			char *uuid = (char*)PQgetvalue(res, j, 0);
+//			char *uuid = (char*)malloc(strlen(temp) + 1);
+//			strcpy(uuid, temp);
+			char *pass = (char*)PQgetvalue(res, j, 1);
+//			char *pass= (char*)malloc(strlen(temp) + 1);
+//			strcpy(pass, temp);
+			users.emplace(users.begin(), uuid, pass, atol(PQgetvalue(res, j, 2)));
 		}
 				
 		PQclear(res);
@@ -163,27 +169,55 @@ std::vector<User> data_store_connection::getAllUsers()
 }
 
 
-std::map<std::string, Account> data_store_connection::get_accounts_for_user(std::string& user)
+std::map<char *, Account, cmp_key> data_store_connection::get_accounts_for_user(const char *user, Heap_List * heap_head)
 {
-	std::map<std::string, Account> accounts;
+	std::map<char *, Account, cmp_key> accounts;
 	const char *values[1];
-	values[0] = user.c_str();
+	values[0] = user;
+	unsigned int indx = 0;
+	unsigned int sz;
+	Heap_List *cur_heap = heap_head;
+	unsigned int len[6];
+	char *val[6];
 	
 	try {
 		PGresult *res = PQexecPrepared_wrapper(get_accounts_for_user_pre, values, 1);
+		sz = PQntuples(res) * 256;
+		heap_head->heap = (char*)malloc(sz);
+		char *heap;
 	
 		for (int i = 0; i < PQntuples(res); i++) {
-			accounts.emplace(std::string{PQgetvalue(res, i, 0)}, Account{std::string{PQgetvalue(res, i, 0)}, 
-				std::string{PQgetvalue(res, i, 1)},
-				std::string{PQgetvalue(res, i, 2)}, std::string{PQgetvalue(res, i, 3)},
-				std::string{PQgetvalue(res, i, 4)}, std::string{PQgetvalue(res, i, 5)},
-				atoll(PQgetvalue(res, i, 6)), 
-				((std::string{PQgetvalue(res, i, 7)}=="t") ? true : false)}); //TODO TODO revist bool postgres c lib
+			val[0] = PQgetvalue(res, i, 0);
+			len[0] = strlen(val[0]);
+			val[1] = PQgetvalue(res, i, 1);
+			len[1] = strlen(val[1]);
+			val[2] = PQgetvalue(res, i, 2);
+			len[2] = strlen(val[2]);
+			val[3] = PQgetvalue(res, i, 3);
+			len[3] = strlen(val[3]);
+			val[4] = PQgetvalue(res, i, 4);
+			len[4] = strlen(val[4]);
+			val[5] = PQgetvalue(res, i, 5);
+			len[5] = strlen(val[5]);
+			
+			cur_heap = increase_list_buffer(len[0]+len[1]+len[2]+len[3]+len[4]+len[5], sz, indx, cur_heap);
+			heap = cur_heap->heap;
+			
+			for (unsigned int j=0; j<6; j++) {
+				strcpy(&heap[indx], val[j]);
+				indx += len[j] + 1;
+				len[j] = indx - len[j] - 1;
+			}
+		
+			bool deleted = (PQgetvalue(res, i, 7)[0] == 't') ? true : false;
+//printf("Account Name: %s, uuid: %s\n", &heap[len[0]], &heap[len[1]]);
+			accounts.emplace(&heap[len[0]], Account{&heap[len[0]], &heap[len[1]], &heap[len[2]], &heap[len[3]],
+				&heap[len[4]], &heap[len[5]], atol(PQgetvalue(res, i, 6)), deleted});
 		}
 		
 		PQclear(res);
 	} catch (const char* error) {
-		printf("Error getting accounts for user: %s, error: %s\n", user.c_str(), error);
+		printf("Error getting accounts for user: %s, error: %s\n", user, error);
 		throw "Error in ::get_accounts_for_user";
 	}
 			
@@ -191,35 +225,50 @@ std::map<std::string, Account> data_store_connection::get_accounts_for_user(std:
 }
 
 
-bool data_store_connection::upsert_accounts_for_user(std::string& user, std::vector<Account>& accounts)
+bool data_store_connection::upsert_accounts_for_user(const char *user, std::vector<Account>& accounts)
 {
 	if (accounts.size() < 1) 
 		return true;
 	
 	bool success{true};
 	const char *values[8 * accounts.size()];
-	std::string sql = UPSERT_ACCOUNT_PREPARE_1;
 	int i{0};
+	unsigned int indx{0};
+	unsigned int sz = 500 + (100 * accounts.size());
+	char *buf = (char*) malloc(sz);
+	unsigned int needed{0};
+	indx = sprintf(buf, "%s", UPSERT_ACCOUNT_PREPARE_1);
 
 	for (Account &a : accounts) {
-		if (i++ != 0)
-			sql += ", ";
-		sql += "('" + a.account_name + "', '" + user + "', '" + a.user_name + "', '" + a.password + "', '" +
-			a.old_password + "', '" + a.url + "', " + std::to_string(a.update_time) + ", " + 
-			((a.deleted) ? "true" : "false") + ")";
+		if (i++ != 0) {
+			strcpy(&buf[indx], ", ");
+			indx += 2;
+		}
+		
+		needed = strlen(a.account_name) + strlen(a.user_name) + strlen(a.password) + strlen(a.old_password) +
+			strlen(a.url) + 70;
+			
+		sz = increase_buffer(needed, sz, indx, buf);
+		
+		indx += sprintf(&buf[indx], "('%s', '%s', '%s', '%s', '%s', '%s', %ld, %s)", a.account_name, user,
+			a.user_name, a.password, a.old_password, a.url, a.update_time, (a.deleted) ? t : f);
 	}
 	
-	sql += " " + UPSERT_ACCOUNT_PREPARE_2;
+	sz = increase_buffer(300, sz, indx, buf);
+	sprintf(&buf[indx], "%s", UPSERT_ACCOUNT_PREPARE_2);
+//printf("\n\nSQL:\n%s\n\n", buf);
 	
 	try {
-		PGresult *res = PQexec_wrapper(sql.c_str());
+		PGresult *res = PQexec_wrapper(buf);
 		PQclear(res);
 	} catch (const char* error) {
-		printf("Error upserting for user: %s, error: %s\n", user.c_str(), error);
+		printf("Error upserting for user: %s, error: %s\n", user, error);
 		success = false;
+		free(buf);
 		throw "Error in ::upsert_accounts_for_user";
 	}
 
+	free(buf);
 	return success;
 }
 
@@ -228,17 +277,16 @@ bool data_store_connection::createUser(User& user)
 {
 	bool success{true};
 	const char *values[4];
-	values[0] = user.account_uuid.c_str();
-	values[1] = user.account_password.c_str();
+	values[0] = user.account_uuid;
+	values[1] = user.account_password;
 	values[2] = std::to_string(user.account_last_sync).c_str();
-//	values[3] = std::to_string(account_format).c_str();
 	values[3] = "1.00";
 	
 	try {
 		PGresult *res = PQexecPrepared_wrapper(create_user_pre, values, 4);
 		PQclear(res);
 	} catch (const char* error) {
-		printf("Error creating user: %s, error: %s\n", user.account_uuid.c_str(), error);
+		printf("Error creating user: %s, error: %s\n", user.account_uuid, error);
 		success = false;
 		throw "Error in ::createUser";
 	}
@@ -247,20 +295,20 @@ bool data_store_connection::createUser(User& user)
 }
 
 
-bool data_store_connection::update_last_sync_for_user(std::string& user, long long lockTime)
+bool data_store_connection::update_last_sync_for_user(const char *user, long lockTime)
 {
 //printf("UPDATE_LAST_SYNC_FOR_USER_1, user: %s, time: %lld\n", user.c_str(), lockTime);
 	bool success{true};
 	const char *values[2];
 	values[0] = std::to_string(lockTime).c_str();
-	values[1] = user.c_str();
+	values[1] = user;
 //printf("UPDATE_LAST_SYNC_FOR_USER_2, user: %s, time: %s\n", values[1], values[0]);
 	
 	try {
 		PGresult *res = PQexecPrepared_wrapper(update_last_sync_time_pre, values, 2);
 		PQclear(res);
 	} catch (const char* error) {
-		printf("Error updating last sync for user: %s, error: %s\n", user.c_str(), error);
+		printf("Error updating last sync for user: %s, error: %s\n", user, error);
 		success = false;
 		throw "Error in ::update_last_sync_for_user";
 	}
@@ -274,13 +322,13 @@ bool data_store_connection::delete_user(User& user)
 {
 	bool success{true};
 	const char *values[1];
-	values[0] = user.account_uuid.c_str();
+	values[0] = user.account_uuid;
 	
 	try {
 		PGresult *res = PQexecPrepared_wrapper(delete_user_pre, values, 1);
 		PQclear(res);
 	} catch (const char* error) {
-		printf("Error deleting user: %s, error: %s\n", user.account_uuid.c_str(), error);
+		printf("Error deleting user: %s, error: %s\n", user.account_uuid, error);
 		success = false;
 		throw "Error in ::delete_user";
 	}

@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <condition_variable>
+#include <cstring>
 
 //network defaults
 #define SERVER_BIND "ALL"
@@ -40,29 +41,32 @@
 
 
 enum request_type { POST, GET };
+enum operation_type { register_config, delete_user, sync_initial, sync_final };
 
 		
 struct User {
-	std::string account_uuid;
-	std::string account_password;
-	long long account_last_sync;
+	char *account_uuid;
+	char *account_password;
+	long account_last_sync;
 	
-	User() {}
-	User(std::string uuid, std::string password, long long last_sync) : 
-	account_uuid{uuid},
-	account_password{password},
-	account_last_sync{last_sync} 
-	{}
+	User() = default;
+	User(const char *uuid, char *password, long last_sync) : account_uuid{(char*)uuid}, account_password{password}, account_last_sync{last_sync}
+	{
+		account_uuid = (char*)malloc(strlen(uuid) + 1);
+		account_password = (char*)malloc(strlen(password) + 1);
+		strcpy(account_uuid, uuid);
+		strcpy(account_password, password);
+	}
 };
 
 struct User_info 
 {
 	User user;
-	long long lock_time;
+	long lock_time;
 	std::vector<std::condition_variable *> cv_vector;
 	
 	User_info() {}
-	User_info(User user, long long lock_time) :
+	User_info(User user, long lock_time) :
 	user{user},
 	lock_time{lock_time}
 	{}
@@ -73,6 +77,15 @@ struct User_info
 //		return lhs.user.account_uuid > rhs.user.account_uuid;
 //	}
 //};
+
+struct cmp_key
+{
+	bool operator()(char const *a, char const *b) const
+	{
+//		printf("cpmparing a: %s, b: %s\n", a, b);
+		return strcmp(a, b) < 0;
+	}
+};
 
 
 class Config
@@ -138,8 +151,9 @@ public:
 	void setMaxAccountPendingOps(int max_account_pending_ops) {this->max_account_pending_ops = max_account_pending_ops;}
 	
 	bool isSsl() const {return ssl;}
-	const std::string& getBindAddress() const {return bind_address;}
-	int getBindPort() const {return bind_port;}
+//	const std::string& getBindAddress() const {return bind_address;}
+	const char* getBindAddress() const {return bind_address.c_str();}
+	const int getBindPort() const {return bind_port;}
 	bool isDbCleaner() const {return db_cleaner;}
 	int getDbCleanerInterval() const {return db_cleaner_interval;}
 	int getDbCleanerPurgeDays() const {return db_cleaner_purge_days;}

@@ -1,69 +1,86 @@
 #include "config_http.h"
 #include <cstring>
 
-const char* config_http::build_reply(http_status status, http_connection con) 
+char* config_http::build_reply(http_status status, http_connection con) 
 {
-	std::string s;
-	return build_reply(status, con, s);
+//	char *s;
+	return build_reply(status, con, NULL);
 }
 
 
-const char* config_http::build_reply(http_status status, http_connection con, std::string & msg)
+char* config_http::build_reply(http_status status, http_connection con, char *msg)
 {
-	std::string reply, m;
-	m = msg;
+	size_t msg_l{0};
+
+	if (msg != NULL)
+		msg_l = strlen(msg);
 	
+	char *reply;
+	unsigned int reply_i{0};
+	
+	if (msg_l > 0) {
+		reply = (char*)malloc(msg_size + msg_l);
+	} else {
+		reply = (char*)malloc(msg_size + 40);
+	}
+
 	switch (status)
 	{
 		case HTTP_200 :
-			reply = "HTTP/1.1 200 OK\r\n";
-//			m = msg;
+			strcpy(reply, HTTP_200_HDR);
+			reply_i += strlen(HTTP_200_HDR);
 			break;
 		case HTTP_400 :
-			reply = "HTTP/1.1 400 Bad Request\r\n";
+			strcpy(reply, HTTP_400_HDR);
+			reply_i += strlen(HTTP_400_HDR);
 			
-			if (msg.length() < 1)
-				m = "{ error: \"Bad Request\" }";
+			if (msg_l < 1)
+				msg = (char*)HTTP_400_MSG;
 			break;
 		case HTTP_403 :
-			reply = "HTTP/1.1 403 Forbidden\r\n";
+			strcpy(reply, HTTP_403_HDR);
+			reply_i += strlen(HTTP_403_HDR);
 			
-			
-			if (msg.length() < 1)
-				m = "{ error: \"Unauthorized\" }";
+			if (msg_l < 1)
+				msg = (char*)HTTP_403_MSG;
 			break;	
 		case HTTP_500 :
-			reply = "HTTP/1.1 500 Internal Server Error\r\n";
+			strcpy(reply, HTTP_500_HDR);
+			reply_i += strlen(HTTP_500_HDR);
 			
-			if (msg.length() < 1)
-				m = "{ error: \"Internal Server Error\" }";
+			if (msg_l < 1)
+				msg = (char*)HTTP_500_MSG;
 			break;
 		case HTTP_503 :
-			reply = "HTTP/1.1 503 Service Unavailable\r\n";
+			strcpy(reply, HTTP_503_HDR);
+			reply_i += strlen(HTTP_503_HDR);
 			
-			if (msg.length() < 1)
-				m = "{ error: \"Server Busy\" }";
+			if (msg_l < 1)
+				msg = (char*)HTTP_503_MSG;
 			break;
 	}
 	
-	reply += http_content_type;
+	strcpy(&reply[reply_i], http_content_type);
+	reply_i += strlen(http_content_type);
 	
 	switch (con)
 	{
 		case close_con :
-			reply += http_connection_close;
-		break;
+			strcpy(&reply[reply_i], http_connection_close);
+			reply_i += strlen(http_connection_close);
+			break;
 		case keep_alive :
-			reply += http_connection_keep_alive;
-		break;
+			strcpy(&reply[reply_i], http_connection_keep_alive);
+			reply_i += strlen(http_connection_keep_alive);
+			break;
 	}
 	
-	reply += http_content_length;
-	reply += std::to_string(m.length());
-	reply += "\r\n\r\n";
-	reply += m;
+	strcpy(&reply[reply_i], http_content_length);
+	reply_i += strlen(http_content_length);
+	reply_i += sprintf(&reply[reply_i], "%ld", (unsigned int)strlen(msg));
+	strcpy(&reply[reply_i], "\r\n\r\n");
+	reply_i += 4;
+	strcpy(&reply[reply_i], msg);
 	
-	char * tmp = (char *) malloc((reply.length()+1) * sizeof(char));
-	strcpy(tmp, reply.c_str());
-	return tmp;
+	return reply;
 }

@@ -285,8 +285,15 @@ int server::startListener(Config *config)
     struct sockaddr_in addr;
  
     sd = socket(PF_INET, SOCK_STREAM, 0);
+	// set so can bind on restart if socket is still in a closing state
 	int yes{1};
 	setsockopt(sd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
+	// set socket read/write timeout
+	timeval rw_to;
+	rw_to.tv_sec = 15;
+	rw_to.tv_usec = 0;
+	setsockopt(sd, SOL_SOCKET, SO_RCVTIMEO, &rw_to, sizeof(timeval));
+	setsockopt(sd, SOL_SOCKET, SO_SNDTIMEO, &rw_to, sizeof(timeval));
 	
     bzero(&addr, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -511,22 +518,17 @@ void server::start_service_thread_manager()
  */
 
 // functions used by service thread
-bool verify_request(std::string &method, std::string &operation);
-bool read_incoming_bytes(SSL *, std::string &msg, int contentLenth);
-bool parse_header(std::string &header, std::string &operation, std::string &contentLenth, request_type &requestType);
-//void close_client(conn_meta *, std::mutex &, std::atomic_int &, std::vector<int> &, int, char *);
+char * e_strtok(char *txt, const char delim);
+
+bool verify_request(char *method, char *operation, operation_type &op_type, request_type &requestType);
+char* read_incoming_bytes(SSL *, int contentLenth);
+bool parse_header(char *header, operation_type &op_type, int &contentLength, request_type &requestType);
 void close_client(conn_meta *, std::atomic_int &);
 
 // definition of service thread-
-//void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
-//					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
-//					 std::map<std::string, User_info> & infos, fd_set & connections_fd, 
-//					 std::mutex &connections_fd_mutex, int control, std::atomic_int & active_threads, 
-//					 data_store_connection &store, std::vector<int> &clients_to_close, std::mutex &clients_to_close_mux,
-//					 int clients_to_close_control)
 void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
 					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
-					 std::map<std::string, User_info> & infos, fd_set & connections_fd, 
+					 std::map<char *, User_info, cmp_key> & infos, fd_set & connections_fd, 
 					 std::mutex &connections_fd_mutex, int control, std::atomic_int & active_threads, 
 					 data_store_connection &store, std::atomic_bool & read_fds_called)
 {
@@ -595,46 +597,44 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 		}
 		
 		if (!ssl_errros) {
-			std::string request{};
-			std::string header{};
-			std::string operation{};
-			std::string contentLength{};
+			char *request = NULL;
+			operation_type op_type;
+			int content_length{0};
 			request_type requestType;
-//			char buf[1024] = {0};
-//			int bytes, total{0};
-			
-			if (read_incoming_bytes(client->ssl, header, 0)) {
-//				bool valid{true};
-				printf("%s http header bytes read: %lu, header\n%s\n", t_id, header.length(), header.c_str());
 
-				const char * reply;
+			char *header = read_incoming_bytes(client->ssl, 0);
+
+			if (header != NULL) {
+				printf("%s http header bytes read: %lu, header\n%s\n", t_id, strlen(header), header);
+
+				char *reply = NULL;
+				char *reply_msg = NULL;
+				char *embed_json = strstr(header, "{");
 
 				try {
-					if (parse_header(header, operation, contentLength, requestType)) {
+					if (parse_header(header, op_type, content_length, requestType)) {
 
 						if (requestType ==  request_type::POST) {
 							//check if json is included with headers - Revisit to make a much better parser
-							int content_length = std::stoi(contentLength);
+//							int content_length = std::stoi(contentLength);
 							
 							if (content_length < 2)
 								throw register_server_exception(configHttp.build_reply(HTTP_400, close_con));
 
-							std::string::size_type loc = header.find("{", 0);
-							if (loc != std::string::npos) {
-								//assuming { would never should up in any header???
-								request = header.substr(loc, std::string::npos-loc);
+							if (embed_json != NULL) {
+								request = embed_json;
 							} else {
-								read_incoming_bytes(client->ssl, request, content_length);
+								request = read_incoming_bytes(client->ssl, content_length);
 							}
 							
-							if (request.size() < 2)
+							if (request == NULL || strlen(request) < 2)
 								throw register_server_exception(configHttp.build_reply(HTTP_400, close_con));
 							
-							std::string replyMsg = handler.handle_request(operation, request, requestType);
-							reply = configHttp.build_reply(HTTP_200, keep_alive, replyMsg);
+							reply_msg = handler.handle_request(op_type, request, requestType);
+							reply = configHttp.build_reply(HTTP_200, keep_alive, reply_msg);
 						} else if (requestType == request_type::GET) {
-							std::string replyMsg = handler.handle_request(operation, request, requestType);
-							reply = configHttp.build_reply(HTTP_200, keep_alive, replyMsg);
+							reply_msg = handler.handle_request(op_type, request, requestType);
+							reply = configHttp.build_reply(HTTP_200, keep_alive, reply_msg);
 						} else {
 //							reply = configHttp.build_reply(HTTP_400, close_con);
 							throw register_server_exception(configHttp.build_reply(HTTP_400, close_con));
@@ -642,15 +642,37 @@ void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condit
 						
 						int written = SSL_write(client->ssl, reply, strlen(reply));
 						printf("%s Bytes written: %d,\n reply:\n%s\n", t_id, written, reply);
-						free((char*)reply);
+						
+						if (request != embed_json) {
+//							printf("FREEING REQUEST\n");
+							free(request);
+						}
+						
+						if (op_type != sync_final && op_type != delete_user)
+							free(reply_msg);
+						
+						free(reply);
+						free(header);
 					}
 				} catch (register_server_exception &ex) {
 					printf("\n%s: Error:\nHeader\n%s\nRequest\n%s\nError\n%s\n", t_id, 
-							header.c_str(), request.c_str(), ex.what());
+							header, request, ex.what());
 					SSL_write(client->ssl, ex.what(), strlen(ex.what()));
-//					close_client(client, clients_to_close_mux, connections, clients_to_close, clients_to_close_control, control_buf);
 					close_client(client, connections);
 					active_threads--;
+	
+					if (request != embed_json)
+						free(header);
+
+					if (request != NULL && request != embed_json) 
+						free(request);
+						
+					if (reply_msg != NULL && op_type != sync_final && op_type != delete_user)
+						free(reply_msg);
+						
+					if (reply != NULL)
+						free(reply);
+
 					continue;
 				}
 			} else {
@@ -684,22 +706,28 @@ if (!read_fds_called) {
 }
 
 
-bool verify_request(std::string &method, std::string &operation)
+bool verify_request(char *method, char *operation, operation_type &op_type, request_type &requestType)
 {
-	if (method == HTTP_POST) {
-		if (operation == REGISTER_CONFIG)
-			return true;
-		else if (operation == DELETE_USER)
-			return true;
-		else if (operation == SYNC_INITIAL)
-			return true;
-		else if (operation == SYNC_FINAL)
-			return true;
+	if (strcmp(method, HTTP_POST) == 0) {
+		requestType = request_type::POST; 
+		
+		if (strcmp(operation, REGISTER_CONFIG) == 0)
+			op_type = register_config;
+		else if (strcmp(operation, DELETE_USER) == 0)
+			op_type = delete_user;
+		else if (strcmp(operation, SYNC_INITIAL) == 0)
+			op_type = sync_initial;
+		else if (strcmp(operation, SYNC_FINAL) == 0)
+			op_type = sync_final;
 		else {
 			config_http configHttp;
 			throw register_server_exception{configHttp.build_reply(HTTP_400, close_con)};
 		}
-	} else if (method == HTTP_GET && operation == REGISTER_CONFIG) {
+		
+		return true;
+	} else if (strcmp(method, HTTP_GET) == 0 && strcmp(operation, REGISTER_CONFIG) == 0) {
+		requestType = request_type::GET;
+		op_type = register_config;
 		return true;
 	} else {
 		config_http configHttp;
@@ -708,64 +736,88 @@ bool verify_request(std::string &method, std::string &operation)
 }
 
 
-bool read_incoming_bytes(SSL *ssl, std::string &msg, int contentLength)
+char * read_incoming_bytes(SSL *ssl, int contentLength)
 {
-	char buf[1024] = {0};
-	int bytes, total{0};
+//	char buf[1024] = {0};
+	char *buf = NULL;
+	int bytes{0};
+	unsigned int i{0};
 
 	do {
-		bytes = SSL_read(ssl, buf, sizeof(buf));
-		buf[bytes] = '\0';
-		msg.append(buf);
-		total += bytes;
+		buf = (char*) realloc(buf, i + 1024);
+		bytes = SSL_read(ssl, &buf[i], 1024);
+//		buf[bytes] = '\0';
+//		msg.append(buf);
+		i += bytes;
 		printf("bytes read: %d\n", bytes);
-	} while ((total < contentLength || SSL_has_pending(ssl)/*&& bytes == 1024*/) && bytes != -1); 
+		
+		if (bytes < 1) {
+			printf("Error in server::read_incoming_bytes, total bytes read: %d\n", i);
+			free(buf);
+			return NULL;
+		}
+	} while ((i < contentLength || SSL_has_pending(ssl)/*&& bytes == 1024*/) && bytes != -1); 
 	// could be an issue if a header happens to be exactly 1024 since the length is not
 	// known. may look at better solution.
 	
-	if (total < 1) 
-		return false;
-	else
-		return true;
-	
+	if (i < 1) {
+		return NULL;
+	} else {
+		if (i % 1024 == 0)
+			buf = (char*) realloc(buf, i + 1);
+		
+		buf[i] = '\0';
+		return buf;
+	}
 }
 
 
-bool parse_header(std::string &header, std::string &operation, std::string &contentLength, request_type &requestType)
+bool parse_header(char *header, operation_type &op_type, int &contentLength, request_type &requestType)
 {
-	// get method 
-	std::string resource = header.substr(0, header.find("\n", 0));
-	std::string::size_type loc = resource.find(" ", 0);
-				
-	if (loc == std::string::npos) 
+	
+	
+	char *line_br;
+	char *tok_line = strtok_r(header, "\n", &line_br);
+	char *tok_word;
+
+	// get method & operation
+	char *method;
+	char *operation;
+	
+	if (tok_line != NULL) {
+		if ((method = strtok(tok_line, " ")) == NULL)
+//		if ((method = e_strtok(tok_line, ' ')) == NULL)
+			return false;
+
+		if ((operation = strtok(NULL, " ")) == NULL)
+//		if ((operation = e_strtok(NULL, ' ')) == NULL)
+			return false;
+	} else {
 		return false;
+	}
+
+	if (!verify_request(method, operation, op_type, requestType))
+		return false;
+
+//	if (strcmp(method, HTTP_GET) == 0) {
+//		requestType = request_type::GET;
+//	} else if (strcmp(method, HTTP_POST) == 0) {
+	if (requestType == request_type::POST) {
 		
-	std::string method = resource.substr(0, loc);
-
-  //get operation
-	std::string::size_type loc2 = resource.find(" ", loc+1);
-
-	if (loc2 == std::string::npos) 
-		return false;
-
-	operation = resource.substr(loc+1, loc2-(loc+1));
-
-	if (!verify_request(method, operation))
-		return false;
-
-	if (method == HTTP_GET) {
-		requestType = request_type::GET;
-	} else if (method == HTTP_POST) {	
-		requestType = request_type::POST;
-		loc = header.find(HTTP_CONTENT_LENGTH_UPPER);
-
-		if (loc == std::string::npos)
-			loc = header.find(HTTP_CONTENT_LENGTH_LOWER);
-			if (loc == std::string::npos)
-				return false;
-
-		loc2 = header.find("\n", loc);
-		contentLength = header.substr(loc+16, loc2-loc+16);
+		while ((tok_line = strtok_r(NULL, "\n", &line_br)) != NULL) {
+			tok_word = strtok(tok_line, " ");
+//			tok_word = e_strtok(tok_line, ' ');
+			
+			if (tok_word != NULL && (strcmp(tok_word, HTTP_CONTENT_LENGTH_UPPER) == 0 || strcmp(tok_word, HTTP_CONTENT_LENGTH_LOWER) == 0)) {
+				tok_word = strtok(NULL, " ");
+//				tok_word = e_strtok(NULL, ' ');
+				
+				if (tok_word != NULL) {
+					contentLength = atoi(tok_word);
+					break;
+				}
+			}
+		}
 	}
 	
 	return true;
@@ -789,4 +841,30 @@ client->socket = -1;
 //	clients_to_close.push_back(client->socket);
 //	clients_to_close_mux.unlock();
 //	write(clients_to_close_control, control_buf, 1);
+}
+
+
+char * e_strtok(char *txt, const char delim)
+{
+	static unsigned int i{0};
+	static char *t;
+	unsigned int s;
+printf("i=%d\n", i);
+	if (txt != NULL) {
+		i = s = 0;
+		t = txt;
+	} else {
+		t[i] = delim;
+		s = ++i;
+	}
+	
+	while (t[i] != delim && t[i] != '\0')
+		i++;
+		
+	if (i == s && t[i] == '\0')
+		return NULL;
+		
+	t[i] = '\0';
+printf("returning: %s\n", &t[s]);
+	return &t[s];
 }

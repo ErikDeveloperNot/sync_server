@@ -55,7 +55,7 @@ private:
 	
 	SSL_CTX *ctx;
 
-	std::map<std::string, User_info> infos;
+	std::map<char *, User_info, cmp_key> infos;
 	std::map<int, conn_meta> conn_map;
 	
 	data_store_connection store;
@@ -104,7 +104,7 @@ public:
 
 void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
 					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
-					 std::map<std::string, User_info> &, fd_set &, std::mutex &fd_set_mutex, int, 
+					 std::map<char *, User_info, cmp_key> &, fd_set &, std::mutex &fd_set_mutex, int, 
 					 std::atomic_int &active_threads, data_store_connection &store, std::atomic_bool &read_fds_called); /*, std::vector<int> &, std::mutex &,
 					 int);*/
 

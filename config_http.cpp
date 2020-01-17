@@ -77,7 +77,7 @@ char* config_http::build_reply(http_status status, http_connection con, char *ms
 	
 	strcpy(&reply[reply_i], http_content_length);
 	reply_i += strlen(http_content_length);
-	reply_i += sprintf(&reply[reply_i], "%ld", (unsigned int)strlen(msg));
+	reply_i += sprintf(&reply[reply_i], "%u", (unsigned int)strlen(msg));
 	strcpy(&reply[reply_i], "\r\n\r\n");
 	reply_i += 4;
 	strcpy(&reply[reply_i], msg);

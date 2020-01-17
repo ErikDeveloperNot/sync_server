@@ -60,7 +60,7 @@ AS       := /usr/bin/as
 ## User defined environment variables
 ##
 CodeLiteDir:=/Applications/codelite.app/Contents/SharedSupport/
-Objects0=$(IntermediateDirectory)/main.cpp$(ObjectSuffix) $(IntermediateDirectory)/server.cpp$(ObjectSuffix) $(IntermediateDirectory)/sync_handler.cpp$(ObjectSuffix) $(IntermediateDirectory)/json_parser_exception.cpp$(ObjectSuffix) $(IntermediateDirectory)/data_store_connection.cpp$(ObjectSuffix) $(IntermediateDirectory)/json_parser.cpp$(ObjectSuffix) $(IntermediateDirectory)/Config.cpp$(ObjectSuffix) $(IntermediateDirectory)/register_server_exception.cpp$(ObjectSuffix) $(IntermediateDirectory)/config_http.cpp$(ObjectSuffix) 
+Objects0=$(IntermediateDirectory)/main.cpp$(ObjectSuffix) $(IntermediateDirectory)/server.cpp$(ObjectSuffix) $(IntermediateDirectory)/sync_handler.cpp$(ObjectSuffix) $(IntermediateDirectory)/data_store_connection.cpp$(ObjectSuffix) $(IntermediateDirectory)/Config.cpp$(ObjectSuffix) $(IntermediateDirectory)/register_server_exception.cpp$(ObjectSuffix) $(IntermediateDirectory)/config_http.cpp$(ObjectSuffix) 
 
 
 
@@ -115,14 +115,6 @@ $(IntermediateDirectory)/sync_handler.cpp$(DependSuffix): sync_handler.cpp
 $(IntermediateDirectory)/sync_handler.cpp$(PreprocessSuffix): sync_handler.cpp
 	$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) $(PreprocessOnlySwitch) $(OutputSwitch) $(IntermediateDirectory)/sync_handler.cpp$(PreprocessSuffix) sync_handler.cpp
 
-$(IntermediateDirectory)/json_parser_exception.cpp$(ObjectSuffix): json_parser_exception.cpp $(IntermediateDirectory)/json_parser_exception.cpp$(DependSuffix)
-	$(CXX) $(IncludePCH) $(SourceSwitch) "/Users/user1/udemy/CPP/UdemyCPP/registrationServer/json_parser_exception.cpp" $(CXXFLAGS) $(ObjectSwitch)$(IntermediateDirectory)/json_parser_exception.cpp$(ObjectSuffix) $(IncludePath)
-$(IntermediateDirectory)/json_parser_exception.cpp$(DependSuffix): json_parser_exception.cpp
-	@$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) -MG -MP -MT$(IntermediateDirectory)/json_parser_exception.cpp$(ObjectSuffix) -MF$(IntermediateDirectory)/json_parser_exception.cpp$(DependSuffix) -MM json_parser_exception.cpp
-
-$(IntermediateDirectory)/json_parser_exception.cpp$(PreprocessSuffix): json_parser_exception.cpp
-	$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) $(PreprocessOnlySwitch) $(OutputSwitch) $(IntermediateDirectory)/json_parser_exception.cpp$(PreprocessSuffix) json_parser_exception.cpp
-
 $(IntermediateDirectory)/data_store_connection.cpp$(ObjectSuffix): data_store_connection.cpp $(IntermediateDirectory)/data_store_connection.cpp$(DependSuffix)
 	$(CXX) $(IncludePCH) $(SourceSwitch) "/Users/user1/udemy/CPP/UdemyCPP/registrationServer/data_store_connection.cpp" $(CXXFLAGS) $(ObjectSwitch)$(IntermediateDirectory)/data_store_connection.cpp$(ObjectSuffix) $(IncludePath)
 $(IntermediateDirectory)/data_store_connection.cpp$(DependSuffix): data_store_connection.cpp
@@ -130,14 +122,6 @@ $(IntermediateDirectory)/data_store_connection.cpp$(DependSuffix): data_store_co
 
 $(IntermediateDirectory)/data_store_connection.cpp$(PreprocessSuffix): data_store_connection.cpp
 	$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) $(PreprocessOnlySwitch) $(OutputSwitch) $(IntermediateDirectory)/data_store_connection.cpp$(PreprocessSuffix) data_store_connection.cpp
-
-$(IntermediateDirectory)/json_parser.cpp$(ObjectSuffix): json_parser.cpp $(IntermediateDirectory)/json_parser.cpp$(DependSuffix)
-	$(CXX) $(IncludePCH) $(SourceSwitch) "/Users/user1/udemy/CPP/UdemyCPP/registrationServer/json_parser.cpp" $(CXXFLAGS) $(ObjectSwitch)$(IntermediateDirectory)/json_parser.cpp$(ObjectSuffix) $(IncludePath)
-$(IntermediateDirectory)/json_parser.cpp$(DependSuffix): json_parser.cpp
-	@$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) -MG -MP -MT$(IntermediateDirectory)/json_parser.cpp$(ObjectSuffix) -MF$(IntermediateDirectory)/json_parser.cpp$(DependSuffix) -MM json_parser.cpp
-
-$(IntermediateDirectory)/json_parser.cpp$(PreprocessSuffix): json_parser.cpp
-	$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) $(PreprocessOnlySwitch) $(OutputSwitch) $(IntermediateDirectory)/json_parser.cpp$(PreprocessSuffix) json_parser.cpp
 
 $(IntermediateDirectory)/Config.cpp$(ObjectSuffix): Config.cpp $(IntermediateDirectory)/Config.cpp$(DependSuffix)
 	$(CXX) $(IncludePCH) $(SourceSwitch) "/Users/user1/udemy/CPP/UdemyCPP/registrationServer/Config.cpp" $(CXXFLAGS) $(ObjectSwitch)$(IntermediateDirectory)/Config.cpp$(ObjectSuffix) $(IncludePath)

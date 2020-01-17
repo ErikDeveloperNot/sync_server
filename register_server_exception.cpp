@@ -1,13 +1,13 @@
 #include "register_server_exception.h"
 #include <cstring>
 
-register_server_exception::register_server_exception(char* msg) : copyContructed{true} 
+register_server_exception::register_server_exception(char* msg)  
 {
 	copy_message(msg);
 //	printf("RegisterExeption 1\n");
 }
 
-register_server_exception::register_server_exception(const char* msg) : copyContructed{true}
+register_server_exception::register_server_exception(const char* msg) 
 {
 //	message = (char*)msg;
 	copy_message((char*)msg);
@@ -19,7 +19,7 @@ const char* register_server_exception::register_server_exception::what() const n
 }
 
 
-register_server_exception::register_server_exception(const register_server_exception & other) : copyContructed{true}
+register_server_exception::register_server_exception(const register_server_exception & other) 
 {
 //	message = (char*) malloc(strlen(other.what())+1 * sizeof(char));
 //	message = strcpy(message, other.what());
@@ -28,7 +28,7 @@ register_server_exception::register_server_exception(const register_server_excep
 //	printf("RegisterExeption 3\n");
 }
 
-register_server_exception::register_server_exception(const register_server_exception && other) : copyContructed{true}
+register_server_exception::register_server_exception(const register_server_exception && other) 
 {
 //	message = (char*) malloc(strlen(other.what())+1 * sizeof(char));
 //	message = strcpy(message, other.what());

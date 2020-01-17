@@ -236,7 +236,6 @@ char * sync_handler::handle_sync_initial(char *request)
 		const char acct_name_src[] = {"/accounts/%d/accountName"};
 		const char update_time_src[] = {"/accounts/%d/updateTime"};
 		char p_dst[100];
-		error err = none;
 		
 		/*
 		 * for each account sent from client check with store list to see if send back/send to/nothing
@@ -563,7 +562,7 @@ void sync_handler::unlock_user(const char *forUser, long lockTime)
 void sync_handler::debug_user_infos()
 {
 	for (auto &k : user_infos) {
-		printf("%s, %lld\n", k.first, user_infos[k.first].lock_time);
+		printf("%s, %ld\n", k.first, user_infos[k.first].lock_time);
 	}
 }
 

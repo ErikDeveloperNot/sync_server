@@ -33,7 +33,7 @@ static const char  http_content_length[] = {"Content-Length: "};
 
 
 //429 is used for too many requests for the same account
-enum http_status : int {HTTP_200, HTTP_400, HTTP_403, HTTP_429, HTTP_500, HTTP_503};
+enum http_status : int {HTTP_200, HTTP_400, HTTP_403, HTTP_500, HTTP_503};
 //enum http_message : int {HTTP_200, HTTP_400, HTTP_401, HTTP_500_SERVER_ERROR, HTTP_500_USER_EXIST, HTTP_503};
 enum http_connection : int {keep_alive, close_con};
 

@@ -20,7 +20,6 @@ public:
 	
 private:
 	char* message;
-	bool copyContructed;
 	
 	void copy_message(char *);
 };

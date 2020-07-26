@@ -113,7 +113,8 @@ PGconn* data_store_connection::connect()
 	bool connected{false};
 	int attempts{1};
 	std::string conn_info{""};
-	conn_info.append("hostaddr=").append(config->getDbServer());
+//	conn_info.append("hostaddr=").append(config->getDbServer());			//todo - numeric version
+	conn_info.append("host=").append(config->getDbServer());				//hostname version
 	conn_info.append(" port=").append(config->getDbPort());
 	conn_info.append(" dbname=").append(config->getDbName());
 	conn_info.append(" user=").append(config->getDbUsername());

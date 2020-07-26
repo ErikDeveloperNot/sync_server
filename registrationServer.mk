@@ -13,7 +13,7 @@ CurrentFileName        :=
 CurrentFilePath        :=
 CurrentFileFullPath    :=
 User                   :=User One
-Date                   :=16/01/2020
+Date                   :=06/02/2020
 CodeLitePath           :="/Users/user1/Library/Application Support/CodeLite"
 LinkerName             :=/usr/bin/clang++
 SharedObjectLinkerName :=/usr/bin/clang++ -dynamiclib -fPIC
@@ -60,7 +60,7 @@ AS       := /usr/bin/as
 ## User defined environment variables
 ##
 CodeLiteDir:=/Applications/codelite.app/Contents/SharedSupport/
-Objects0=$(IntermediateDirectory)/main.cpp$(ObjectSuffix) $(IntermediateDirectory)/server.cpp$(ObjectSuffix) $(IntermediateDirectory)/sync_handler.cpp$(ObjectSuffix) $(IntermediateDirectory)/data_store_connection.cpp$(ObjectSuffix) $(IntermediateDirectory)/Config.cpp$(ObjectSuffix) $(IntermediateDirectory)/register_server_exception.cpp$(ObjectSuffix) $(IntermediateDirectory)/config_http.cpp$(ObjectSuffix) 
+Objects0=$(IntermediateDirectory)/main.cpp$(ObjectSuffix) $(IntermediateDirectory)/server.cpp$(ObjectSuffix) $(IntermediateDirectory)/Config.cpp$(ObjectSuffix) $(IntermediateDirectory)/sync_handler.cpp$(ObjectSuffix) $(IntermediateDirectory)/data_store_connection.cpp$(ObjectSuffix) $(IntermediateDirectory)/register_server_exception.cpp$(ObjectSuffix) $(IntermediateDirectory)/config_http.cpp$(ObjectSuffix) 
 
 
 
@@ -107,6 +107,14 @@ $(IntermediateDirectory)/server.cpp$(DependSuffix): server.cpp
 $(IntermediateDirectory)/server.cpp$(PreprocessSuffix): server.cpp
 	$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) $(PreprocessOnlySwitch) $(OutputSwitch) $(IntermediateDirectory)/server.cpp$(PreprocessSuffix) server.cpp
 
+$(IntermediateDirectory)/Config.cpp$(ObjectSuffix): Config.cpp $(IntermediateDirectory)/Config.cpp$(DependSuffix)
+	$(CXX) $(IncludePCH) $(SourceSwitch) "/Users/user1/udemy/CPP/UdemyCPP/registrationServer/Config.cpp" $(CXXFLAGS) $(ObjectSwitch)$(IntermediateDirectory)/Config.cpp$(ObjectSuffix) $(IncludePath)
+$(IntermediateDirectory)/Config.cpp$(DependSuffix): Config.cpp
+	@$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) -MG -MP -MT$(IntermediateDirectory)/Config.cpp$(ObjectSuffix) -MF$(IntermediateDirectory)/Config.cpp$(DependSuffix) -MM Config.cpp
+
+$(IntermediateDirectory)/Config.cpp$(PreprocessSuffix): Config.cpp
+	$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) $(PreprocessOnlySwitch) $(OutputSwitch) $(IntermediateDirectory)/Config.cpp$(PreprocessSuffix) Config.cpp
+
 $(IntermediateDirectory)/sync_handler.cpp$(ObjectSuffix): sync_handler.cpp $(IntermediateDirectory)/sync_handler.cpp$(DependSuffix)
 	$(CXX) $(IncludePCH) $(SourceSwitch) "/Users/user1/udemy/CPP/UdemyCPP/registrationServer/sync_handler.cpp" $(CXXFLAGS) $(ObjectSwitch)$(IntermediateDirectory)/sync_handler.cpp$(ObjectSuffix) $(IncludePath)
 $(IntermediateDirectory)/sync_handler.cpp$(DependSuffix): sync_handler.cpp
@@ -122,14 +130,6 @@ $(IntermediateDirectory)/data_store_connection.cpp$(DependSuffix): data_store_co
 
 $(IntermediateDirectory)/data_store_connection.cpp$(PreprocessSuffix): data_store_connection.cpp
 	$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) $(PreprocessOnlySwitch) $(OutputSwitch) $(IntermediateDirectory)/data_store_connection.cpp$(PreprocessSuffix) data_store_connection.cpp
-
-$(IntermediateDirectory)/Config.cpp$(ObjectSuffix): Config.cpp $(IntermediateDirectory)/Config.cpp$(DependSuffix)
-	$(CXX) $(IncludePCH) $(SourceSwitch) "/Users/user1/udemy/CPP/UdemyCPP/registrationServer/Config.cpp" $(CXXFLAGS) $(ObjectSwitch)$(IntermediateDirectory)/Config.cpp$(ObjectSuffix) $(IncludePath)
-$(IntermediateDirectory)/Config.cpp$(DependSuffix): Config.cpp
-	@$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) -MG -MP -MT$(IntermediateDirectory)/Config.cpp$(ObjectSuffix) -MF$(IntermediateDirectory)/Config.cpp$(DependSuffix) -MM Config.cpp
-
-$(IntermediateDirectory)/Config.cpp$(PreprocessSuffix): Config.cpp
-	$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) $(PreprocessOnlySwitch) $(OutputSwitch) $(IntermediateDirectory)/Config.cpp$(PreprocessSuffix) Config.cpp
 
 $(IntermediateDirectory)/register_server_exception.cpp$(ObjectSuffix): register_server_exception.cpp $(IntermediateDirectory)/register_server_exception.cpp$(DependSuffix)
 	$(CXX) $(IncludePCH) $(SourceSwitch) "/Users/user1/udemy/CPP/UdemyCPP/registrationServer/register_server_exception.cpp" $(CXXFLAGS) $(ObjectSwitch)$(IntermediateDirectory)/register_server_exception.cpp$(ObjectSuffix) $(IncludePath)

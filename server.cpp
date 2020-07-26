@@ -850,7 +850,7 @@ char * e_strtok(char *txt, const char delim)
 	static unsigned int i{0};
 	static char *t;
 	unsigned int s;
-printf("i=%d\n", i);
+//printf("i=%d\n", i);
 	if (txt != NULL) {
 		i = s = 0;
 		t = txt;
@@ -866,6 +866,6 @@ printf("i=%d\n", i);
 		return NULL;
 		
 	t[i] = '\0';
-printf("returning: %s\n", &t[s]);
+//printf("returning: %s\n", &t[s]);
 	return &t[s];
 }

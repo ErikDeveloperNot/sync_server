@@ -9,6 +9,9 @@
 
 float account_format = 1.00;
 
+
+
+
 data_store_connection::data_store_connection() //: connected{false}
 {
 }
@@ -18,8 +21,8 @@ data_store_connection::~data_store_connection()
 //	PQfinish(conn);
 	connections_mutex.lock();
 	
-	for (PGconn *conn : connections)
-		PQfinish(conn);
+	for (void *conn : connections)
+		PQfinish((PGconn*) conn);
 		
 	connections.clear();
 	connections_mutex.unlock();
@@ -30,7 +33,7 @@ data_store_connection::~data_store_connection()
 bool data_store_connection::initialize(Config *config) 
 {
 	this->config = config;
-	current_connections = config->getDbMinConnections();
+	currentConnections = config->getDbMinConnections();
 	max_connections = config->getDbMaxConnections();
 	
 	for (size_t i{0}; i < config->getDbMinConnections(); i++) {
@@ -41,22 +44,22 @@ bool data_store_connection::initialize(Config *config)
 			if (createPreparedStatements(conn)) {
 				connections.push_back(conn);
 			} else {
-				current_connections--;
+				currentConnections--;
 				PQfinish(conn);
 			}
 		} catch (const char *error) {
 			printf("Error in data_store initialize: %s\n", error);
-			current_connections--;
+			currentConnections--;
 		}
 	}
 
-	printf("Data store initialized with: %d:%d connections\n", current_connections, connections.size());
-	start_connection_manager();
+	printf("Data store initialized with: %d:%lu connections\n", currentConnections, connections.size());
+	start_connection_manager(config);
 	
 	if (config->isDbCleaner())
-		start_data_cleaner();
+		start_data_cleaner(config);
 	
-	return (current_connections > 0) ? true : false;
+	return (currentConnections > 0) ? true : false;
 }
 
 
@@ -232,7 +235,7 @@ bool data_store_connection::upsert_accounts_for_user(const char *user, std::vect
 		return true;
 	
 	bool success{true};
-	const char *values[8 * accounts.size()];
+//	const char *values[8 * accounts.size()];
 	int i{0};
 	unsigned int indx{0};
 	unsigned int sz = 500 + (100 * accounts.size());
@@ -252,7 +255,7 @@ bool data_store_connection::upsert_accounts_for_user(const char *user, std::vect
 		sz = increase_buffer(needed, sz, indx, buf);
 		
 		indx += sprintf(&buf[indx], "('%s', '%s', '%s', '%s', '%s', '%s', %ld, %s)", a.account_name, user,
-			a.user_name, a.password, a.old_password, a.url, a.update_time, (a.deleted) ? t : f);
+			a.user_name, a.password, a.old_password, a.url, (long)a.update_time, (a.deleted) ? t : f);
 	}
 	
 	sz = increase_buffer(300, sz, indx, buf);
@@ -296,12 +299,13 @@ bool data_store_connection::createUser(User& user)
 }
 
 
-bool data_store_connection::update_last_sync_for_user(const char *user, long lockTime)
+bool data_store_connection::update_last_sync_for_user(const char *user, long long lockTime)
 {
 //printf("UPDATE_LAST_SYNC_FOR_USER_1, user: %s, time: %lld\n", user.c_str(), lockTime);
 	bool success{true};
 	const char *values[2];
-	values[0] = std::to_string(lockTime).c_str();
+	sprintf(sync_buf, "%ld", (long)lockTime);
+	values[0] = sync_buf;
 	values[1] = user;
 //printf("UPDATE_LAST_SYNC_FOR_USER_2, user: %s, time: %s\n", values[1], values[0]);
 	
@@ -309,9 +313,9 @@ bool data_store_connection::update_last_sync_for_user(const char *user, long loc
 		PGresult *res = PQexecPrepared_wrapper(update_last_sync_time_pre, values, 2);
 		PQclear(res);
 	} catch (const char* error) {
-		printf("Error updating last sync for user: %s, error: %s\n", user, error);
+		printf("Error updating last sync for user: %s, lockTime: %ld, error: %s\n", user, (long)lockTime, error);
 		success = false;
-		throw "Error in ::update_last_sync_for_user";
+		//throw "Error in ::update_last_sync_for_user";
 	}
 	
 	return success;
@@ -363,7 +367,7 @@ PGresult* data_store_connection::PQexecPrepared_wrapper(const char* pre, const c
 			if (PQstatus(conn) != CONNECTION_OK) {
 				printf("DB connection bad\n");
 				connections_mutex.lock();
-				current_connections--;
+				currentConnections--;
 				connections_mutex.unlock();
 				connections_cv.notify_one();
 				PQfinish(conn);
@@ -410,7 +414,7 @@ PGresult* data_store_connection::PQexec_wrapper(const char* sql)
 			if (PQstatus(conn) != CONNECTION_OK) {
 				printf("DB connection bad\n");
 				connections_mutex.lock();
-				current_connections--;
+				currentConnections--;
 				connections_mutex.unlock();
 				connections_cv.notify_one();
 				PQfinish(conn);
@@ -444,16 +448,16 @@ void data_store_connection::release_connection(PGconn* conn)
 PGconn* data_store_connection::get_connection()
 {
 	PGconn *conn;
-	printf("unused db connections: %d, current connections count: %d\n", connections.size(), current_connections);
+	printf("unused db connections: %lu, current connections count: %d\n", connections.size(), currentConnections);
 	std::unique_lock<std::mutex> lock{connections_mutex};
 	
 	if (connections.size() > 0) {
 		//get a connection
-		conn = connections.back();
+		conn = (PGconn*)connections.back();
 		connections.pop_back();
-	} else if (current_connections < max_connections) {
+	} else if (currentConnections < max_connections) {
 		//create a new connection
-		current_connections++;
+		currentConnections++;
 		lock.unlock();
 		printf("Creating new db connection\n");
 		
@@ -461,18 +465,18 @@ PGconn* data_store_connection::get_connection()
 			conn = connect();
 		
 			if (createPreparedStatements(conn)) {
-				return conn;
+//				return conn;
 			} else {
 				PQfinish(conn);
 				lock.lock();
-				current_connections--;
+				currentConnections--;
 				lock.unlock();
 				connections_cv.notify_one();
 				throw "Error creating prepared statemnets in ::get_connection";
 			}
 		} catch (const char *error) {
 			lock.lock();
-			current_connections--;
+			currentConnections--;
 			lock.unlock();
 			connections_cv.notify_one();
 			throw "Error getting connection in ::get_connection";
@@ -484,7 +488,7 @@ PGconn* data_store_connection::get_connection()
 			return connections.size() > 0;
 		});
 		
-		conn = connections.back();
+		conn = (PGconn*) connections.back();
 		connections.pop_back();
 	}
 	
@@ -493,65 +497,81 @@ PGconn* data_store_connection::get_connection()
 }
 
 
-void data_store_connection::start_connection_manager()
+
+/*
+ * virtual implemnetation called by connection manager thread
+ */
+void data_store_connection::closeConn(void *conn)
 {
-	printf("Starting db connection manager thread\n");
-	
-	std::thread manager([&] () {
-		int min_conn = config->getDbMinConnections();
-		int counter{0};
-		int magic_number{2};
-		std::vector<PGconn *> conns_to_close;
-		
-		while (true) {
-			std::this_thread::sleep_for(std::chrono::seconds(60));
-//			printf("Data Store connection manager is woke\n");
-			
-			connections_mutex.lock();
-			int curr = current_connections;
-			int in_use = curr - connections.size();
-//			connections_mutex.unlock();
-//			connections_cv.notify_one();
-			
-			if (curr < min_conn) {
-				//need to add connections, let the sync handler threads do it
-			} else if (curr == min_conn || in_use > 0.2 * curr) {
-				//nothing to do, at min or enough cons are being used so dont shrink
-				counter = 0;
-			} else {
-				//increment counter and check if connections need to be removed
-				if (++counter >= magic_number) {
-					int to_close = (curr - min_conn) * 0.4;
-					
-					if (to_close < 1)
-						to_close = curr - min_conn;
-						
-					for (size_t i{0}; i<to_close; i++) {
-						conns_to_close.push_back(connections.back());
-						connections.pop_back();
-						current_connections--;
-					}
-				}
-			}
-			
-			connections_mutex.unlock();
-			connections_cv.notify_one();
-//			printf("Data Store connection current connections: %d, inuse: %d, counter: %d\n", curr, in_use, counter);
-			
-			if (conns_to_close.size() > 0) {
-				printf("Closing %d data store connections\n", conns_to_close.size());
-				
-				for (PGconn *conn : conns_to_close)
-					PQfinish(conn);
-					
-				conns_to_close.clear();
-				counter = 0;
-			}
-		}
-	});
-	
-	manager.detach();
+	PQfinish((PGconn*)conn);
 }
+
+
+/*
+ * virtual implemnetation called by db cleaner thread
+ */
+void data_store_connection::deleteOldUsers(long time_ms)
+{
+	std::string select_old_sql_smt = OLD_ACCOUNT_SQL + std::to_string(time_ms);
+	std::string delete_old_sql_smt = DELETE_OLD_ACCOUNTS_SQL + std::to_string(time_ms);
+
+	try {
+		PGresult *res = PQexec_wrapper(select_old_sql_smt.c_str());
+		int cnt = PQntuples(res);
+				
+		if (cnt > 0) {
+			printf("Postgres DB cleaner, the following current accounts will be removed\n");
+						
+			for (size_t i{0}; i<cnt; i++) {
+				printf("user: %s, account: %s\n", PQgetvalue(res, i, 0), PQgetvalue(res, i, 1));
+			}
+						
+			PQclear(res);
+			res = PQexec_wrapper(delete_old_sql_smt.c_str());
+			PQclear(res);
+		} else {
+			printf("Postgres DB cleaner, no current accounts will be removed\n");
+			PQclear(res);
+		}
+					
+	} catch (const char *error) {
+		printf("Postgres DB cleaner, error executing current accounts delete: %s\n", error);
+	}
+}
+
+
+/*
+ * virtual implemnetation called by db cleaner thread
+ */
+void data_store_connection::deleteHistory(long time_sec)
+{
+	std::string select_sql_smt = ACCOUNT_HISTORY_SQL + std::to_string(time_sec);
+	std::string delete_sql_smt = DELETE_HISTORY_SQL + std::to_string(time_sec);
+				
+	try {
+		PGresult *res = PQexec_wrapper(select_sql_smt.c_str());
+		int cnt = PQntuples(res);
+				
+		if (cnt > 0) {
+			printf("Postgres DB cleaner, the following history accounts will be removed\n");
+						
+			for (size_t i{0}; i<cnt; i++) {
+				printf("user: %s, account: %s\n", PQgetvalue(res, i, 0), PQgetvalue(res, i, 1));
+			}
+						
+			PQclear(res);
+			res = PQexec_wrapper(delete_sql_smt.c_str());
+			PQclear(res);
+		} else {
+			printf("Postgres DB cleaner, no history accounts will be removed\n");
+			PQclear(res);
+		}
+					
+	} catch (const char *error) {
+		printf("Postgres DB cleaner, error executing history delete: %s\n", error);
+	}
+}
+
 
 
 long current_time_sec()
@@ -564,97 +584,3 @@ long current_time_milli()
 	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-long get_next_run()
-{
-	time_t h = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-	tm *local = localtime(&h);
-	long sleep_for_minutes = 59 - local->tm_min;
-	sleep_for_minutes += (23 - local->tm_hour) * 60;
-	return sleep_for_minutes + 2;
-}
-
-// interval is in days, how often the cleaner runs, at most once a day
-// days is how long to keep deleted accounts in the history table
-void data_store_connection::start_data_cleaner()
-{
-	std::thread cleaner([&] () {
-		int interval = config->getDbCleanerInterval();
-		int days = config->getDbCleanerPurgeDays();
-		int history_days = config->getDbCleanerHistoryPurgeDays();
-		long day_in_milli{86400000};
-		long day_in_sec{86400};
-		long day_in_min{1440};
-		//first run will be at next midnight + 2 minutes no matter what the interval is
-		long next_run = get_next_run();
-		printf("DB Cleaner started, interval: %d, history days: %d, days: %d, next run: %d minutes\n", interval, history_days, days, next_run);
-		
-		while (true) {
-			printf("DB Cleaner sleeping for %ld minutes\n", next_run);
-			std::this_thread::sleep_for(std::chrono::minutes(next_run));
-			printf("DB Cleaner starting task\n");
-			
-			long curr_sec = current_time_sec();
-			long history_delete_sec = curr_sec - (history_days * day_in_sec);
-			printf("DB cleaner removing any history accounts older then %ld\n", history_delete_sec);
-			std::string select_sql_smt = ACCOUNT_HISTORY_SQL + std::to_string(history_delete_sec);
-			std::string delete_sql_smt = DELETE_HISTORY_SQL + std::to_string(history_delete_sec);
-			
-			long curr_milli = current_time_milli();
-			long delete_milli = curr_milli - (days * day_in_milli);
-			printf("DB cleaner removing any current accounts older then %ld\n", delete_milli);
-			std::string select_old_sql_smt = OLD_ACCOUNT_SQL + std::to_string(delete_milli);
-			std::string delete_old_sql_smt = DELETE_OLD_ACCOUNTS_SQL + std::to_string(delete_milli);
-			
-			try {
-				PGresult *res = PQexec_wrapper(select_old_sql_smt.c_str());
-				int cnt = PQntuples(res);
-			
-				if (cnt > 0) {
-					printf("DB cleaner, the following current accounts will be removed\n");
-					
-					for (size_t i{0}; i<cnt; i++) {
-						printf("user: %s, account: %s\n", PQgetvalue(res, i, 0), PQgetvalue(res, i, 1));
-					}
-					
-					PQclear(res);
-					res = PQexec_wrapper(delete_old_sql_smt.c_str());
-					PQclear(res);
-				} else {
-					printf("DB cleaner, no current accounts will be removed\n");
-					PQclear(res);
-				}
-				
-			} catch (const char *error) {
-				printf("DB cleaner, error executing current accounts delete: %s\n", error);
-			}
-			
-			try {
-				PGresult *res = PQexec_wrapper(select_sql_smt.c_str());
-				int cnt = PQntuples(res);
-			
-				if (cnt > 0) {
-					printf("DB cleaner, the following history accounts will be removed\n");
-					
-					for (size_t i{0}; i<cnt; i++) {
-						printf("user: %s, account: %s\n", PQgetvalue(res, i, 0), PQgetvalue(res, i, 1));
-					}
-					
-					PQclear(res);
-					res = PQexec_wrapper(delete_sql_smt.c_str());
-					PQclear(res);
-				} else {
-					printf("DB cleaner, no history accounts will be removed\n");
-					PQclear(res);
-				}
-				
-			} catch (const char *error) {
-				printf("DB cleaner, error executing history delete: %s\n", error);
-			}
-			
-			next_run = get_next_run() + (day_in_min * (1-interval));
-			printf("Next run will in %d minutes\n", next_run);
-		}
-	});
-	
-	cleaner.detach();
-}

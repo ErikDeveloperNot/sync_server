@@ -97,7 +97,14 @@ server::server(Config *conf)
 	current_thread_count = 0;
 	active_threads = 0;
 	
-	store.initialize(config);
+//	store.initialize(config);
+	if (config->getStoreType() == postgres_store) {
+		store = new data_store_connection{};
+	} else {
+		store = new RedisStore{};
+	}
+	
+	store->initialize(config);
 	
 	for (int i{1}; i<=config->getServiceThreads(); i++) {
 		start_service_thread();
@@ -295,6 +302,8 @@ int server::startListener(Config *config)
 	// set socket read/write timeout
 	setsockopt(sd, SOL_SOCKET, SO_RCVTIMEO, &rw_to, sizeof(timeval));
 	setsockopt(sd, SOL_SOCKET, SO_SNDTIMEO, &rw_to, sizeof(timeval));
+	// ignore broken pipe writes
+//	setsockopt(sd, SOL_SOCKET, SO_NOSIGPIPE, (void *)&yes, sizeof(int));
 	
     bzero(&addr, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -451,7 +460,7 @@ void server::shutdown(bool immdeiate)
 
 	}
 	
-	
+	delete store;
 	printf("Server done\n");
 }
 
@@ -460,10 +469,14 @@ void server::start_service_thread()
 {
 	current_thread_count++;
 	
+//	std::thread t{service_thread, std::ref(service_q), std::ref(service_mutex), 
+//						std::ref(cv), ctx, std::ref(current_connections), config, std::ref(infos),
+//						std::ref(connection_fds), std::ref(connection_fds_mutex), control[1], std::ref(active_threads), 
+//						std::ref(store), std::ref(read_fds_called)}; //, std::ref(clients_to_close), std::ref(clients_to_close_mux), control2[1]};
 	std::thread t{service_thread, std::ref(service_q), std::ref(service_mutex), 
 						std::ref(cv), ctx, std::ref(current_connections), config, std::ref(infos),
 						std::ref(connection_fds), std::ref(connection_fds_mutex), control[1], std::ref(active_threads), 
-						std::ref(store), std::ref(read_fds_called)}; //, std::ref(clients_to_close), std::ref(clients_to_close_mux), control2[1]};
+						store, std::ref(read_fds_called)}; //, std::ref(clients_to_close), std::ref(clients_to_close_mux), control2[1]};
 	
 		std::stringstream ss;
 		ss << t.get_id();
@@ -527,11 +540,16 @@ bool parse_header(char *header, operation_type &op_type, int &contentLength, req
 void close_client(conn_meta *, std::atomic_int &);
 
 // definition of service thread-
+//void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
+//					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
+//					 std::map<char *, User_info, cmp_key> & infos, fd_set & connections_fd, 
+//					 std::mutex &connections_fd_mutex, int control, std::atomic_int & active_threads, 
+//					 data_store_connection &store, std::atomic_bool & read_fds_called)
 void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
 					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
 					 std::map<char *, User_info, cmp_key> & infos, fd_set & connections_fd, 
 					 std::mutex &connections_fd_mutex, int control, std::atomic_int & active_threads, 
-					 data_store_connection &store, std::atomic_bool & read_fds_called)
+					 IDataStore *store, std::atomic_bool & read_fds_called)
 {
 	std::thread::id id = std::this_thread::get_id();
 	std::stringstream ss;
@@ -741,9 +759,9 @@ char * read_incoming_bytes(SSL *ssl, int contentLength)
 {
 //	char buf[1024] = {0};
 	char *buf = NULL;
-	int bytes{0};
+	int bytes{0}, attempt{0};
 	unsigned int i{0};
-
+	
 	do {
 		buf = (char*) realloc(buf, i + 1024);
 		bytes = SSL_read(ssl, &buf[i], 1024);
@@ -754,8 +772,13 @@ char * read_incoming_bytes(SSL *ssl, int contentLength)
 		
 		if (bytes < 1) {
 			printf("Error in server::read_incoming_bytes, total bytes read: %d\n", i);
-			free(buf);
-			return NULL;
+			
+			if (attempt >= SSL_READ_ATTEMPTS) {
+				free(buf);
+				return NULL;
+			}
+			
+			attempt++;				// only increment on zero returns
 		}
 	} while ((i < contentLength || SSL_has_pending(ssl)/*&& bytes == 1024*/) && bytes != -1); 
 	// could be an issue if a header happens to be exactly 1024 since the length is not
@@ -777,8 +800,9 @@ bool parse_header(char *header, operation_type &op_type, int &contentLength, req
 {
 	
 	
-	char *line_br;
-	char *tok_line = strtok_r(header, "\n", &line_br);
+	char *line_re;		// used for rentrant for entire header
+	char *word_re;		// used for rentrant for each line
+	char *tok_line = strtok_r(header, "\n", &line_re);
 	char *tok_word;
 
 	// get method & operation
@@ -786,11 +810,13 @@ bool parse_header(char *header, operation_type &op_type, int &contentLength, req
 	char *operation;
 	
 	if (tok_line != NULL) {
-		if ((method = strtok(tok_line, " ")) == NULL)
+		if ((method = strtok_r(tok_line, " ", &word_re)) == NULL)
+//		if ((method = strtok(tok_line, " ")) == NULL)
 //		if ((method = e_strtok(tok_line, ' ')) == NULL)
 			return false;
 
-		if ((operation = strtok(NULL, " ")) == NULL)
+		if ((operation = strtok_r(NULL, " ", &word_re)) == NULL)
+//		if ((operation = strtok(NULL, " ")) == NULL)
 //		if ((operation = e_strtok(NULL, ' ')) == NULL)
 			return false;
 	} else {
@@ -805,12 +831,14 @@ bool parse_header(char *header, operation_type &op_type, int &contentLength, req
 //	} else if (strcmp(method, HTTP_POST) == 0) {
 	if (requestType == request_type::POST) {
 		
-		while ((tok_line = strtok_r(NULL, "\n", &line_br)) != NULL) {
-			tok_word = strtok(tok_line, " ");
+		while ((tok_line = strtok_r(NULL, "\n", &line_re)) != NULL) {
+			tok_word = strtok_r(tok_line, " ", &word_re);
+//			tok_word = strtok(tok_line, " ");
 //			tok_word = e_strtok(tok_line, ' ');
 			
 			if (tok_word != NULL && (strcmp(tok_word, HTTP_CONTENT_LENGTH_UPPER) == 0 || strcmp(tok_word, HTTP_CONTENT_LENGTH_LOWER) == 0)) {
-				tok_word = strtok(NULL, " ");
+				tok_word = strtok_r(NULL, " ", &word_re);
+//				tok_word = strtok(NULL, " ");
 //				tok_word = e_strtok(NULL, ' ');
 				
 				if (tok_word != NULL) {

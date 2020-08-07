@@ -21,7 +21,7 @@
 
 #define MAX_ACCOUNT_PENDING_OPS 3
 
-//database defaults
+//database defaults 
 #define DB_SERVER "localhost"
 #define DB_PORT "5432"
 #define DB_NAME "passvault"
@@ -33,6 +33,18 @@
 #define DB_CLEANER_INTERVAL 1
 #define DB_CLEANER_PURGE_DAYS 30
 
+//Redis defaults
+#define REDIS_SERVER "redis"
+#define REDIS_PORT 6379
+#define REDIS_USER "redis"
+#define REDIS_PASS "redis"
+#define REDIS_MIN_CONNECTIONS 10
+#define REDIS_MAX_CONNECTIONS 200
+#define REDIS_CLEANER true
+#define REDIS_CLEANER_INTERVAL 1
+#define REDIS_CLEANER_PURGE_DAYS 30
+
+
 //operation types
 #define REGISTER_CONFIG "/PassvaultServiceRegistration/service/registerV1/sync-server"
 #define DELETE_USER "/PassvaultServiceRegistration/service/deleteAccount/sync-server"
@@ -43,14 +55,16 @@
 enum request_type { POST, GET };
 enum operation_type { register_config, delete_user, sync_initial, sync_final };
 
+enum store_type { postgres_store, redis_store };
+
 		
 struct User {
 	char *account_uuid;
 	char *account_password;
-	long account_last_sync;
+	long long account_last_sync;
 	
 	User() = default;
-	User(const char *uuid, char *password, long last_sync) : account_uuid{(char*)uuid}, account_password{password}, account_last_sync{last_sync}
+	User(const char *uuid, char *password, long long last_sync) : account_uuid{(char*)uuid}, account_password{password}, account_last_sync{last_sync}
 	{
 		account_uuid = (char*)malloc(strlen(uuid) + 1);
 		account_password = (char*)malloc(strlen(password) + 1);
@@ -91,6 +105,7 @@ struct cmp_key
 class Config
 {
 private:
+	// Server settings
 	std::string bind_address = SERVER_BIND;
 	int bind_port = SERVER_PORT;
 	int service_threads = SERVICE_THREADS;
@@ -105,6 +120,7 @@ private:
 	
 	int max_account_pending_ops = MAX_ACCOUNT_PENDING_OPS;
 	
+	// Postgres settings
 	std::string db_server = DB_SERVER;
 	std::string db_port = DB_PORT;
 	std::string db_password = DB_PASS;
@@ -117,7 +133,20 @@ private:
 	int db_cleaner_purge_days = DB_CLEANER_PURGE_DAYS;
 	int db_cleaner_history_purge_days = DB_CLEANER_PURGE_DAYS;
 	
+	// Redis settings
+	std::string redis_server = REDIS_SERVER;
+	int redis_port = REDIS_PORT;
+	std::string redis_username = REDIS_USER;
+	std::string redis_password = REDIS_PASS;
+	int redis_min_connections = REDIS_MIN_CONNECTIONS;
+	int redis_max_connections = REDIS_MAX_CONNECTIONS;
+	bool redis_cleaner = REDIS_CLEANER;
+	int redis_cleaner_interval = REDIS_CLEANER_INTERVAL;
+	int redis_cleaner_purge_days = REDIS_CLEANER_PURGE_DAYS;
+	int redis_cleaner_history_purge_days = REDIS_CLEANER_PURGE_DAYS;
 	
+	
+	store_type storeType;
 	void setKeyValue(char*, char*);
 	
 public:
@@ -132,7 +161,7 @@ public:
 	void setDbCleanerInterval(int db_cleaner_interval) {this->db_cleaner_interval = db_cleaner_interval;}
 	void setDbCleanerPurgeDays(int db_cleaner_purge_days) {this->db_cleaner_purge_days = db_cleaner_purge_days;}
 	void setDbCleanerHistoryPurgeDays(int db_cleaner_history_purge_days) {this->db_cleaner_history_purge_days = db_cleaner_history_purge_days;}
-	void setDbName(const std::string& db_name) {this->db_name = db_name;}
+	void setDbName(const std::string& db_name) {this->db_name = db_name; storeType = postgres_store;}
 	void setDbPassword(const std::string& db_password) {this->db_password = db_password;}
 	void setDbPort(const std::string& db_port) {this->db_port = db_port;}
 	void setDbServer(const std::string& db_server) {this->db_server = db_server;}
@@ -149,6 +178,17 @@ public:
 	void setServerUseKeepAliveCleaner(bool server_use_keep_alive_cleaner) {this->server_use_keep_alive_cleaner = server_use_keep_alive_cleaner;}
 	void setServerTcpBackLog(int server_tcp_back_log) {this->server_tcp_back_log = server_tcp_back_log;}
 	void setMaxAccountPendingOps(int max_account_pending_ops) {this->max_account_pending_ops = max_account_pending_ops;}
+	void setRedisCleaner(bool redis_cleaner) {this->redis_cleaner = redis_cleaner;}
+	void setRedisCleanerInterval(int redis_cleaner_interval) {this->redis_cleaner_interval = redis_cleaner_interval;}
+	void setRedisCleanerPurgeDays(int redis_cleaner_purge_days) {this->redis_cleaner_purge_days = redis_cleaner_purge_days;}
+	void setRedisCleanerHistoryPurgeDays(int redis_cleaner_history_purge_days) {this->redis_cleaner_history_purge_days = redis_cleaner_history_purge_days;}
+	void setRedisMaxConnections(int redis_max_connections) {this->redis_max_connections = redis_max_connections;}
+	void setRedisMinConnections(int redis_min_connections) {this->redis_min_connections = redis_min_connections;}
+	void setRedisPassword(const std::string& redis_password) {this->redis_password = redis_password;}
+	void setRedisPort(int redis_port) {this->redis_port = redis_port;}
+	void setRedisServer(const std::string& redis_server) {this->redis_server = redis_server; storeType = redis_store;}
+	void setRedisUsername(const std::string& redis_username) {this->redis_username = redis_username;}
+	
 	
 	bool isSsl() const {return ssl;}
 //	const std::string& getBindAddress() const {return bind_address;}
@@ -174,7 +214,18 @@ public:
 	bool isServerUseKeepAliveCleaner() const {return server_use_keep_alive_cleaner;}
 	int getMaxAccountPendingOps() const {return max_account_pending_ops;}
 	int getServerTcpBackLog() const {return server_tcp_back_log;}
+	bool isRedisCleaner() const {return redis_cleaner;}
+	int getRedisCleanerInterval() const {return redis_cleaner_interval;}
+	int getRedisCleanerPurgeDays() const {return redis_cleaner_purge_days;}
+	int getRedisCleanerHistoryPurgeDays() const {return redis_cleaner_history_purge_days;}
+	int getRedisMaxConnections() const {return redis_max_connections;}
+	int getRedisMinConnections() const {return redis_min_connections;}
+	const std::string& getRedisPassword() const {return redis_password;}
+	int getRedisPort() const {return redis_port;}
+	const std::string& getRedisServer() const {return redis_server;}
+	const std::string& getRedisUsername() const {return redis_username;}
 	
+	store_type getStoreType() const {return storeType;}
 };
 
 

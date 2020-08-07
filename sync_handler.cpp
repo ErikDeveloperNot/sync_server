@@ -10,7 +10,7 @@
 
 
 sync_handler::sync_handler(const std::string &thread_id, Config *config, 
-							std::map<char *, User_info, cmp_key> &user_infos, data_store_connection &store) :
+							std::map<char *, User_info, cmp_key> &user_infos, IDataStore *store) :
 t_id{thread_id},
 store{store},
 config{config},
@@ -18,7 +18,7 @@ user_infos{user_infos}
 {
 	std::call_once(onceFlag, [&]() {
 		printf("%s: initializing the user_infos set\n", t_id.c_str());
-		std::vector<User> users = store.getAllUsers();
+		std::vector<User> users = store->getAllUsers();
 		
 		for (User x : users) {
 			user_infos[x.account_uuid] = User_info{x, 0L};
@@ -102,7 +102,7 @@ char * sync_handler::handle_register(char *request)
 		user_infos_lock.unlock();
 		user_infos_cv.notify_one();
 
-		if (!store.createUser(user)) {
+		if (!store->createUser(user)) {
 			//account creation failed
 			user_infos_lock.lock();
 			user_infos.erase(user.account_uuid);
@@ -180,7 +180,7 @@ char * sync_handler::handle_delete(char *request)
 		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
-	if (!store.delete_user(user_infos[(char*)email].user)) {
+	if (!store->delete_user(user_infos[(char*)email].user)) {
 		printf("Error deleting account %s from the database\n", email);
 //		unlock_user(registerConfigReq.email, current_t);
 		throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
@@ -203,9 +203,9 @@ char * sync_handler::handle_delete(char *request)
 
 char * sync_handler::handle_sync_initial(char *request)
 {
-//	printf("Sync Initial:\n%s\n", request.c_str());
+//	printf("Sync Initial:\n%s\n", request);
 
-	jsonP_parser parser{request, (unsigned int)strlen(request), PRESERVE_JSON};    //<--- REMOVE LATER
+	jsonP_parser parser{request, (unsigned int)strlen(request), PRESERVE_JSON };    //<--- REMOVE LATER
 	jsonP_json *pDoc = nullptr;
 //	char *heap = NULL;
 	Heap_List heap{};
@@ -222,11 +222,11 @@ char * sync_handler::handle_sync_initial(char *request)
 			throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 		}
 		
-		long cts = current_time_sec();
+		long long cts = current_time_sec();
 		jsonP_json resp_doc{object, 4, 1024, DONT_SORT_KEYS};
 		resp_doc.add_value_type(numeric_long, 0, responseCode_key, &default_response_code);
 		resp_doc.add_value_type(numeric_long, 0, lockTime_key, &cts);
-		std::map<char*, Account, cmp_key> accounts = store.get_accounts_for_user(email, &heap);
+		std::map<char*, Account, cmp_key> accounts = store->get_accounts_for_user(email, &heap);
 		char *account_name;
 		
 		object_id sendAccountsToServerList = resp_doc.add_container(sendAccountsToServerList_key, 5, 0, array);
@@ -241,9 +241,16 @@ char * sync_handler::handle_sync_initial(char *request)
 		 * for each account sent from client check with store list to see if send back/send to/nothing
 		 */
 		for (int i=0; i < mem_cnt; i++) {
-//			std::cout << "TYPE: " << get_element_type_string(typ) << ", k_cnt: " << pDoc->get_members_count(*(object_id*)value) << std::endl;
 			sprintf(p_dst, acct_name_src, i);
 			account_name = (char*) pDoc->get_string_value(p_dst, delim, &jsonP_err);
+
+//fprintf(stderr, "\n\nACCOUNT_NAME: %s  -  %s\n\n", account_name, p_dst);
+//if (jsonP_err != none) {
+//	char *t = pDoc->stringify_pretty();
+//	fprintf(stderr, "ERROR:%d-%d-%d\n%s\n\n", jsonP_err, i, mem_cnt, t);
+//	free(t);
+////	continue;
+//}
 
 			if (accounts.count(account_name) > 0) {
 				sprintf(p_dst, update_time_src, i);
@@ -340,16 +347,19 @@ char * sync_handler::handle_sync_final(char *request)
 		throw register_server_exception{configHttp.build_reply(HTTP_403, close_con)};
 	}
 	
-	long relockTime = current_time_sec();
+	long relockTime = (long)current_time_sec();
 	//update store
-	if (store.upsert_accounts_for_user((char*)email, accounts)) {
-		if (!store.update_last_sync_for_user(email, relockTime)) {
+	if (store->upsert_accounts_for_user((char*)email, accounts)) {
+		if (!store->update_last_sync_for_user(email, relockTime)) {
 			printf("Failed to update last SyncTime for user: %s in syncFinal\n", email);
+printf(">>>>>>>>> relockTime: %ld\n", relockTime);
+			delete pDoc;
 			throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 		}
 	} else {
 		//means there was at least 1 failure, so dont update last sync time so another sync can be done
 		printf("Failed to update accounts for user: %s in syncFinal\n", email);
+		delete pDoc;
 		throw register_server_exception{configHttp.build_reply(HTTP_500, close_con)};
 	}
 
@@ -369,7 +379,7 @@ long long sync_handler::current_time_ms()
 }
 
 
-long sync_handler::current_time_sec()
+long long sync_handler::current_time_sec()
 {
 	return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
@@ -378,7 +388,7 @@ long sync_handler::current_time_sec()
 /*
  *  deprecated -  no longer needed, instead use upsert with on conflict
  */
-long sync_handler::lock_user(const char *forUser)
+long long sync_handler::lock_user(const char *forUser)
 {
 	std::unique_lock<std::mutex> lock(user_infos_lock);
 	
@@ -442,7 +452,7 @@ long sync_handler::lock_user(const char *forUser)
 
 
 
-	long current_lock = current_time_sec();
+	long long current_lock = current_time_sec();
 
 //printf("######### %lld : %lld : %lld\n", current_lock, user_infos[forUser].lock_time, LOCK_TIMEOUT);
 //	if (current_lock - user_infos[forUser].lock_time < LOCK_TIMEOUT) {
@@ -492,9 +502,9 @@ long sync_handler::lock_user(const char *forUser)
 /*
  *  deprecated -  no longer needed, instead use upsert with on conflict
  */
-long sync_handler::relock_user(const char *forUser, long userLock)
+long long sync_handler::relock_user(const char *forUser, long long userLock)
 {
-	long toReturn{0};
+	long long toReturn{0};
 	std::unique_lock<std::mutex> lock(user_infos_lock);
 	
 	if (user_infos.count((char*)forUser) < 1) {
@@ -522,7 +532,7 @@ long sync_handler::relock_user(const char *forUser, long userLock)
 /*
  *  deprecated -  no longer needed, instead use upsert with on conflict
  */
-void sync_handler::unlock_user(const char *forUser, long lockTime)
+void sync_handler::unlock_user(const char *forUser, long long lockTime)
 {
 	user_infos_lock.lock();
 //	user_infos[forUser].lock_time = 0;
@@ -562,7 +572,7 @@ void sync_handler::unlock_user(const char *forUser, long lockTime)
 void sync_handler::debug_user_infos()
 {
 	for (auto &k : user_infos) {
-		printf("%s, %ld\n", k.first, user_infos[k.first].lock_time);
+		printf("%s, last sync: %lld\n", k.first, user_infos[k.first].user.account_last_sync);
 	}
 }
 
@@ -574,9 +584,7 @@ bool sync_handler::verify_password(const char *user, const char *pw)
 		return false;
 		
 	char hashed[1024];
-//	hash_password(pw, hashed);
 	
-//	if (!hash_password(pw)) {
 	if (!hash_password(pw, hashed)) {
 		printf("Unable to hash password %s for account %s\n", pw, user);
 		return false;

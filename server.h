@@ -15,10 +15,16 @@
 
 #include "config_http.h"
 #include "Config.h"
-#include "data_store_connection.h"
+//#include "data_store_connection.h"
+#include "IDataStore.h"
 
-#define END_IT -99
-#define STALE_TIMEOUT 30
+
+// command code to shutdown
+#define END_IT 					-99
+// time out for cleaner thread for stale connections
+#define STALE_TIMEOUT 			30
+// number of SSL socket read attempts for throwing
+#define SSL_READ_ATTEMPTS		10
 
 class Config;
 
@@ -58,7 +64,8 @@ private:
 	std::map<char *, User_info, cmp_key> infos;
 	std::map<int, conn_meta> conn_map;
 	
-	data_store_connection store;
+//	data_store_connection store;
+	IDataStore *store;
 	
 	// socket server variables
 	fd_set connection_fds;
@@ -106,10 +113,15 @@ public:
 };
 
 
+//void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
+//					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
+//					 std::map<char *, User_info, cmp_key> &, fd_set &, std::mutex &fd_set_mutex, int, 
+//					 std::atomic_int &active_threads, data_store_connection &store, std::atomic_bool &read_fds_called); /*, std::vector<int> &, std::mutex &,
+//					 int);*/
 void service_thread(std::queue<conn_meta *> &q, std::mutex &q_mutex, std::condition_variable &cv, 
 					 SSL_CTX *ctx, std::atomic_int &connections, Config *config, 
 					 std::map<char *, User_info, cmp_key> &, fd_set &, std::mutex &fd_set_mutex, int, 
-					 std::atomic_int &active_threads, data_store_connection &store, std::atomic_bool &read_fds_called); /*, std::vector<int> &, std::mutex &,
+					 std::atomic_int &active_threads, IDataStore *store, std::atomic_bool &read_fds_called); /*, std::vector<int> &, std::mutex &,
 					 int);*/
 
 

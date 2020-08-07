@@ -21,6 +21,9 @@ then
   fi
   # pull down sync_server
   scp root@${host}:/root/register_server/sync_server .
+  # replace local header files
+  rm -rf /opt/jsonP/include/*.h
+  cp ${local_src}/*.h /opt/jsonP/include/
 else
   echo "Build may have failed"
 fi

@@ -2,65 +2,13 @@
 #define _DATA_STORE_CONNNECTION_H_
 
 #include <libpq-fe.h>
-#include "Config.h"
+#include "IDataStore.h"
 
 #include <string>
-#include <vector>
-#include <map>
-#include <mutex>
 
 #define CONNECT_ATTEMPTS  10
 #define CONNECT_ATTEMPTS_INTERVAL 10
 
-
-
-struct Account {
-	char *account_name;
-	char *account_uuid;
-	char *user_name;
-	char *password;
-	char *old_password;
-	char *url;
-	long update_time;
-	bool deleted;
-	
-	Account() = default;
-	Account(char *account_name, char *uuid, char *user_name, char *pass, char *old_pass, char *url, long update, bool deleted) :
-	account_name{account_name},
-	account_uuid{uuid},
-	user_name{user_name},
-	password{pass},
-	old_password{old_pass},
-	url{url},
-	update_time{update},
-	deleted{deleted}
-	{}
-};
-
-
-struct Heap_List {
-	char *heap;
-	Heap_List *next;
-	
-	Heap_List() : next{nullptr} 
-	{
-		heap = NULL;
-	};
-	
-	Heap_List(unsigned int sz)
-	{
-		heap = (char*)malloc(sz);
-		next = nullptr;
-	}
-	
-	~Heap_List() {
-		if (heap != NULL) {
-			free(heap);
-		}
-		
-		delete next;
-	};
-};
 
 
 // SQL query
@@ -96,20 +44,12 @@ static const char UPSERT_ACCOUNT_PREPARE_2[] = {"on conflict (account_name, acco
 static const char t[] = {"true"};
 static const char f[] = {"false"};
 
-class data_store_connection
+class data_store_connection : public IDataStore
 {
 private:
 	Config *config;
-//	std::string t_id;
-	
-//	PGconn     *conn;
-//  PGresult   *res;
-//	bool connected;
-	int current_connections;
+	char sync_buf[32];
 	int max_connections;
-	std::vector<PGconn *> connections;
-	std::mutex connections_mutex;
-	std::condition_variable connections_cv;
 	
 	const char *create_user_pre = "create_user_pre";
 	const char *delete_user_pre = "delete_user_pre";
@@ -117,7 +57,7 @@ private:
 	const char *get_accounts_for_user_pre = "get_accounts_for_user_pre";
 //	const char *create_account_pre = "create_account_pre";
 //	const char *update_account_pre = "update_account_pre";
-	const char *upsert_account_pre = "upsert_account_pre";
+//	const char *upsert_account_pre = "upsert_account_pre";
 	
 	PGconn * get_connection();
 	void release_connection(PGconn *);
@@ -129,8 +69,16 @@ private:
 	PGresult* PQexecPrepared_wrapper(const char *pre, const char *args[], int argc);
 	PGresult* PQexec_wrapper(const char *sql);
 	
-	void start_connection_manager();
-	void start_data_cleaner();
+//	void start_connection_manager();
+//	void start_data_cleaner();
+	
+	// override called by connection manager thread
+	virtual void closeConn(void*);
+	// override call by account cleaner thread
+	virtual void deleteOldUsers(long time_ms);
+	// override call by account cleaner thread
+	virtual void deleteHistory(long time_sec);
+	
 	
 	inline unsigned int increase_buffer(unsigned int needed, unsigned int sz, unsigned int indx, char *& txt) 
 	{
@@ -144,33 +92,20 @@ private:
 		return sz;
 	}
 	
-	inline Heap_List * increase_list_buffer(unsigned int needed, unsigned int &sz, unsigned int &indx, Heap_List * heap) 
-	{
-		if (needed + 20 > sz - indx) {
-//printf("\nHEAP_LIST REALLOC NEEDED\n");
-			Heap_List *new_heap = new Heap_List{1024};
-			heap->next = new_heap;
-			sz = 1024;
-			indx = 0;
-			return new_heap;
-		} else {
-//printf("\nHEAP_LIST REALLOC NOT NEEDED\n");
-			return heap;
-		}
-	}
 	
 public:
 	data_store_connection();
-	~data_store_connection();
+	virtual ~data_store_connection();
 
-	bool initialize(Config *);
+	virtual bool initialize(Config *);
 	
-	std::vector<User> getAllUsers();
-	bool createUser(User &user);
-	bool delete_user(User &user);
-	std::map<char *, Account, cmp_key> get_accounts_for_user(const char *user, Heap_List * heap);
-	bool upsert_accounts_for_user(const char *user, std::vector<Account> &accounts);
-	bool update_last_sync_for_user(const char *user, long lockTime);
+	virtual std::vector<User> getAllUsers();
+	virtual bool createUser(User &user);
+	virtual bool delete_user(User &user);
+	virtual std::map<char *, Account, cmp_key> get_accounts_for_user(const char *user, Heap_List * heap);
+	virtual bool upsert_accounts_for_user(const char *user, std::vector<Account> &accounts);
+	virtual bool update_last_sync_for_user(const char *user, long long lockTime);
+	
 };
 
 #endif // _DATA_STORE_CONNNECTION_H_

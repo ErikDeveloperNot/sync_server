@@ -1,7 +1,8 @@
 #ifndef _SYNC_HANDLER_H_
 #define _SYNC_HANDLER_H_
 
-#include "data_store_connection.h"
+//#include "data_store_connection.h"
+#include "IDataStore.h"
 #include "Config.h"
 #include "config_http.h"
 #include "jsonP_parser.h"
@@ -54,7 +55,8 @@ class sync_handler
 {
 private:
 	std::string t_id;
-	data_store_connection &store;
+//	data_store_connection &store;
+	IDataStore *store;
 	Config *config;
 	std::map<char *, User_info, cmp_key> &user_infos;
 	
@@ -70,7 +72,7 @@ private:
 	error jsonP_err;
 	
 	long long current_time_ms();
-	long current_time_sec();
+	long long current_time_sec();
 	
 	//operations
 	char * handle_register(char *request);
@@ -80,16 +82,17 @@ private:
 	char * handle_sync_final(char *request);
 	
 	// lock methods deprecated
-	long lock_user(const char *forUser);
-	long relock_user(const char *forUser, long lock);
-	void unlock_user(const char *forUser, long lockTime);
+	long long lock_user(const char *forUser);
+	long long relock_user(const char *forUser, long long lock);
+	void unlock_user(const char *forUser, long long lockTime);
 	
 	bool verify_email(const char *);
 	bool verify_password(const char *user, const char *pw);
 	bool hash_password(const char *, char *);
 	void debug_user_infos();
 public:
-	sync_handler(const std::string &, Config *, std::map<char *, User_info, cmp_key> &, data_store_connection &store);
+//	sync_handler(const std::string &, Config *, std::map<char *, User_info, cmp_key> &, data_store_connection &store);
+	sync_handler(const std::string &, Config *, std::map<char *, User_info, cmp_key> &, IDataStore *store);
 	~sync_handler();
 
 	char * handle_request(operation_type op_type, char *request, request_type http_type);

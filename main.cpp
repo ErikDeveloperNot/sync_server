@@ -9,23 +9,26 @@ Config *config;
 
 
 void signalHandler( int signum ) {
-   std::cout << "Interrupt signal (" << signum << ") received.\n";
+   std::cerr << "Interrupt signal (" << signum << ") received.\n";
    
    switch (signum)
    {
+//		case SIGPIPE :
+//			fprintf(stderr, "\n\nBROKEN PIPE\n\n");
+//			return;
 		case SIGINT :
 		case SIGHUP :
 		case SIGTERM :
 		case SIGTSTP :
-			printf("graceful shutdown...\n");
+			fprintf(stderr, "graceful shutdown...\n");
 			serv->shutdown(false);
 			break;
 		case SIGKILL :
-			printf("hard shutdown....\n");
+			fprintf(stderr, "hard shutdown....\n");
 			serv->shutdown(true);
 			break;
 		default :
-			printf("No handler for signal: %d\n", signum);
+			fprintf(stderr, "No handler for signal: %d\n", signum);
    }
 
 
@@ -40,6 +43,10 @@ int main(int argc, char **argv)
 		return -1;
 	}
 	
+	// ignore broken pipes on writes instead of exiting
+	signal(SIGPIPE, SIG_IGN);
+	
+	// register my handlers
 	signal(SIGINT, signalHandler);  
 	signal(SIGHUP, signalHandler);  
 	signal(SIGKILL, signalHandler);

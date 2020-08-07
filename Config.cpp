@@ -59,6 +59,7 @@ void Config::setKeyValue(char* key, char* value)
 		server_key = value;
 	} else if (strcmp(key, "db_server") == 0) {
 		db_server = value;
+		storeType = postgres_store;
 	} else if (strcmp(key, "db_port") == 0) {
 		db_port = value;
 	} else if (strcmp(key, "db_password") == 0) {
@@ -89,7 +90,29 @@ void Config::setKeyValue(char* key, char* value)
 		db_max_connections = atoi(value);
 	} else if (strcmp(key, "db_min_connections") == 0) {
 		db_min_connections = atoi(value);
+	} else if (strcmp(key, "redis_server") == 0) {
+		redis_server = value;
+		storeType = redis_store;
+	} else if (strcmp(key, "redis_port") == 0) {
+		redis_port = atoi(value);
+	} else if (strcmp(key, "redis_username") == 0) {
+		redis_username = value;
+	} else if (strcmp(key, "redis_password") == 0) {
+		redis_password = value;
+	} else if (strcmp(key, "redis_min_connections") == 0) {
+		redis_min_connections = atoi(value);
+	} else if (strcmp(key, "redis_max_connections") == 0) {
+		redis_max_connections = atoi(value);
+	} else if (strcmp(key, "redis_cleaner") == 0) {
+		redis_cleaner = (strcmp(value, "true") == 0) ? true: false;
+	} else if (strcmp(key, "redis_cleaner_interval") == 0) {
+		redis_cleaner_interval = atoi(value);
+	} else if (strcmp(key, "redis_cleaner_purge_days") == 0) {
+		redis_cleaner_purge_days = atoi(value);
+	} else if (strcmp(key, "redis_cleaner_history_purge_days") == 0) {
+		redis_cleaner_history_purge_days = atoi(value);
 	}
+	
 }
 
 
@@ -119,4 +142,23 @@ void Config::debugValues()
 	std::cout << "db cleaner interval: " << db_cleaner_interval << std::endl;
 	std::cout << "db cleaner purge days: " << db_cleaner_purge_days << std::endl;
 	std::cout << "db cleaner history purge days: " << db_cleaner_history_purge_days << std::endl;
+	
+	std::cout << "redis_server: " << redis_server << std::endl;
+	std::cout << "redis_port: " << redis_port << std::endl;
+	std::cout << "redis_username: " << redis_username << std::endl;
+	std::cout << "redis_password: " << redis_password << std::endl;
+	std::cout << "redis_min_connections: " << redis_min_connections << std::endl;
+	std::cout << "redis_max_connections: " << redis_max_connections << std::endl;
+	std::cout << "redis cleaner: " << redis_cleaner << std::endl;
+	std::cout << "redis cleaner interval: " << redis_cleaner_interval << std::endl;
+	std::cout << "redis cleaner purge days: " << redis_cleaner_purge_days << std::endl;
+	std::cout << "redis cleaner history purge days: " << redis_cleaner_history_purge_days << std::endl;
+	
+	if (storeType == postgres_store) {
+		std::cout << "\nUsing Store Type: Postgres\n" << std::endl;
+	} else if (storeType == redis_store) {
+		std::cout << "\nUsing Store Type: Redis\n" << std::endl;
+	} else {
+		std::cout << "\nERROR - No store type configured\n" << std::endl;
+	}
 }

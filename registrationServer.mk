@@ -13,7 +13,7 @@ CurrentFileName        :=
 CurrentFilePath        :=
 CurrentFileFullPath    :=
 User                   :=User One
-Date                   :=06/02/2020
+Date                   :=06/08/2020
 CodeLitePath           :="/Users/user1/Library/Application Support/CodeLite"
 LinkerName             :=/usr/bin/clang++
 SharedObjectLinkerName :=/usr/bin/clang++ -dynamiclib -fPIC
@@ -36,12 +36,12 @@ ObjectsFileList        :="registrationServer.txt"
 PCHCompileFlags        :=
 MakeDirCommand         :=mkdir -p
 LinkOptions            :=  
-IncludePath            :=  $(IncludeSwitch). $(IncludeSwitch). $(IncludeSwitch)/opt/openssl/openssl-1.1.1c_install/include $(IncludeSwitch)/Users/user1/udemy/CPP/UdemyCPP/registrationServer_psql/include $(IncludeSwitch)/Users/user1/udemy/CPP/UdemyCPP/jsonP_dyn 
+IncludePath            :=  $(IncludeSwitch). $(IncludeSwitch). $(IncludeSwitch)/opt/openssl/openssl-1.1.1c_install/include $(IncludeSwitch)/Users/user1/udemy/CPP/UdemyCPP/registrationServer_psql/include $(IncludeSwitch)/Users/user1/udemy/CPP/UdemyCPP/jsonP_dyn $(IncludeSwitch)/opt/redis/install/usr/local/include/hiredis 
 IncludePCH             := 
 RcIncludePath          := 
-Libs                   := $(LibrarySwitch)ecpg $(LibrarySwitch)ecpg_compat $(LibrarySwitch)pgcommon $(LibrarySwitch)pgfeutils $(LibrarySwitch)pgport $(LibrarySwitch)pgtypes $(LibrarySwitch)pq $(LibrarySwitch)crypto $(LibrarySwitch)ssl $(LibrarySwitch)jsonP_dyn 
-ArLibs                 :=  "libecpg.a" "libecpg_compat.a" "libpgcommon.a" "libpgfeutils.a" "libpgport.a" "libpgtypes.a" "libpq.a" "libcrypto" "libssl" "libjsonP_dyn" 
-LibPath                := $(LibraryPathSwitch). $(LibraryPathSwitch)/opt/openssl/openssl-1.1.1c_install/lib $(LibraryPathSwitch)/Users/user1/udemy/CPP/UdemyCPP/registrationServer_psql/lib $(LibraryPathSwitch)/Users/user1/udemy/CPP/UdemyCPP/jsonP_dyn/Debug 
+Libs                   := $(LibrarySwitch)ecpg $(LibrarySwitch)ecpg_compat $(LibrarySwitch)pgcommon $(LibrarySwitch)pgfeutils $(LibrarySwitch)pgport $(LibrarySwitch)pgtypes $(LibrarySwitch)pq $(LibrarySwitch)crypto $(LibrarySwitch)ssl $(LibrarySwitch)jsonP_dyn $(LibrarySwitch)hiredis 
+ArLibs                 :=  "libecpg.a" "libecpg_compat.a" "libpgcommon.a" "libpgfeutils.a" "libpgport.a" "libpgtypes.a" "libpq.a" "libcrypto" "libssl" "libjsonP_dyn" "libhiredis" 
+LibPath                := $(LibraryPathSwitch). $(LibraryPathSwitch)/opt/openssl/openssl-1.1.1c_install/lib $(LibraryPathSwitch)/Users/user1/udemy/CPP/UdemyCPP/registrationServer_psql/lib $(LibraryPathSwitch)/Users/user1/udemy/CPP/UdemyCPP/jsonP_dyn/Debug $(LibraryPathSwitch)/opt/redis/install/usr/local/lib 
 
 ##
 ## Common variables
@@ -60,7 +60,7 @@ AS       := /usr/bin/as
 ## User defined environment variables
 ##
 CodeLiteDir:=/Applications/codelite.app/Contents/SharedSupport/
-Objects0=$(IntermediateDirectory)/main.cpp$(ObjectSuffix) $(IntermediateDirectory)/server.cpp$(ObjectSuffix) $(IntermediateDirectory)/Config.cpp$(ObjectSuffix) $(IntermediateDirectory)/sync_handler.cpp$(ObjectSuffix) $(IntermediateDirectory)/data_store_connection.cpp$(ObjectSuffix) $(IntermediateDirectory)/register_server_exception.cpp$(ObjectSuffix) $(IntermediateDirectory)/config_http.cpp$(ObjectSuffix) 
+Objects0=$(IntermediateDirectory)/main.cpp$(ObjectSuffix) $(IntermediateDirectory)/server.cpp$(ObjectSuffix) $(IntermediateDirectory)/sync_handler.cpp$(ObjectSuffix) $(IntermediateDirectory)/data_store_connection.cpp$(ObjectSuffix) $(IntermediateDirectory)/Config.cpp$(ObjectSuffix) $(IntermediateDirectory)/register_server_exception.cpp$(ObjectSuffix) $(IntermediateDirectory)/config_http.cpp$(ObjectSuffix) $(IntermediateDirectory)/RedisStore.cpp$(ObjectSuffix) 
 
 
 
@@ -107,14 +107,6 @@ $(IntermediateDirectory)/server.cpp$(DependSuffix): server.cpp
 $(IntermediateDirectory)/server.cpp$(PreprocessSuffix): server.cpp
 	$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) $(PreprocessOnlySwitch) $(OutputSwitch) $(IntermediateDirectory)/server.cpp$(PreprocessSuffix) server.cpp
 
-$(IntermediateDirectory)/Config.cpp$(ObjectSuffix): Config.cpp $(IntermediateDirectory)/Config.cpp$(DependSuffix)
-	$(CXX) $(IncludePCH) $(SourceSwitch) "/Users/user1/udemy/CPP/UdemyCPP/registrationServer/Config.cpp" $(CXXFLAGS) $(ObjectSwitch)$(IntermediateDirectory)/Config.cpp$(ObjectSuffix) $(IncludePath)
-$(IntermediateDirectory)/Config.cpp$(DependSuffix): Config.cpp
-	@$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) -MG -MP -MT$(IntermediateDirectory)/Config.cpp$(ObjectSuffix) -MF$(IntermediateDirectory)/Config.cpp$(DependSuffix) -MM Config.cpp
-
-$(IntermediateDirectory)/Config.cpp$(PreprocessSuffix): Config.cpp
-	$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) $(PreprocessOnlySwitch) $(OutputSwitch) $(IntermediateDirectory)/Config.cpp$(PreprocessSuffix) Config.cpp
-
 $(IntermediateDirectory)/sync_handler.cpp$(ObjectSuffix): sync_handler.cpp $(IntermediateDirectory)/sync_handler.cpp$(DependSuffix)
 	$(CXX) $(IncludePCH) $(SourceSwitch) "/Users/user1/udemy/CPP/UdemyCPP/registrationServer/sync_handler.cpp" $(CXXFLAGS) $(ObjectSwitch)$(IntermediateDirectory)/sync_handler.cpp$(ObjectSuffix) $(IncludePath)
 $(IntermediateDirectory)/sync_handler.cpp$(DependSuffix): sync_handler.cpp
@@ -131,6 +123,14 @@ $(IntermediateDirectory)/data_store_connection.cpp$(DependSuffix): data_store_co
 $(IntermediateDirectory)/data_store_connection.cpp$(PreprocessSuffix): data_store_connection.cpp
 	$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) $(PreprocessOnlySwitch) $(OutputSwitch) $(IntermediateDirectory)/data_store_connection.cpp$(PreprocessSuffix) data_store_connection.cpp
 
+$(IntermediateDirectory)/Config.cpp$(ObjectSuffix): Config.cpp $(IntermediateDirectory)/Config.cpp$(DependSuffix)
+	$(CXX) $(IncludePCH) $(SourceSwitch) "/Users/user1/udemy/CPP/UdemyCPP/registrationServer/Config.cpp" $(CXXFLAGS) $(ObjectSwitch)$(IntermediateDirectory)/Config.cpp$(ObjectSuffix) $(IncludePath)
+$(IntermediateDirectory)/Config.cpp$(DependSuffix): Config.cpp
+	@$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) -MG -MP -MT$(IntermediateDirectory)/Config.cpp$(ObjectSuffix) -MF$(IntermediateDirectory)/Config.cpp$(DependSuffix) -MM Config.cpp
+
+$(IntermediateDirectory)/Config.cpp$(PreprocessSuffix): Config.cpp
+	$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) $(PreprocessOnlySwitch) $(OutputSwitch) $(IntermediateDirectory)/Config.cpp$(PreprocessSuffix) Config.cpp
+
 $(IntermediateDirectory)/register_server_exception.cpp$(ObjectSuffix): register_server_exception.cpp $(IntermediateDirectory)/register_server_exception.cpp$(DependSuffix)
 	$(CXX) $(IncludePCH) $(SourceSwitch) "/Users/user1/udemy/CPP/UdemyCPP/registrationServer/register_server_exception.cpp" $(CXXFLAGS) $(ObjectSwitch)$(IntermediateDirectory)/register_server_exception.cpp$(ObjectSuffix) $(IncludePath)
 $(IntermediateDirectory)/register_server_exception.cpp$(DependSuffix): register_server_exception.cpp
@@ -146,6 +146,14 @@ $(IntermediateDirectory)/config_http.cpp$(DependSuffix): config_http.cpp
 
 $(IntermediateDirectory)/config_http.cpp$(PreprocessSuffix): config_http.cpp
 	$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) $(PreprocessOnlySwitch) $(OutputSwitch) $(IntermediateDirectory)/config_http.cpp$(PreprocessSuffix) config_http.cpp
+
+$(IntermediateDirectory)/RedisStore.cpp$(ObjectSuffix): RedisStore.cpp $(IntermediateDirectory)/RedisStore.cpp$(DependSuffix)
+	$(CXX) $(IncludePCH) $(SourceSwitch) "/Users/user1/udemy/CPP/UdemyCPP/registrationServer/RedisStore.cpp" $(CXXFLAGS) $(ObjectSwitch)$(IntermediateDirectory)/RedisStore.cpp$(ObjectSuffix) $(IncludePath)
+$(IntermediateDirectory)/RedisStore.cpp$(DependSuffix): RedisStore.cpp
+	@$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) -MG -MP -MT$(IntermediateDirectory)/RedisStore.cpp$(ObjectSuffix) -MF$(IntermediateDirectory)/RedisStore.cpp$(DependSuffix) -MM RedisStore.cpp
+
+$(IntermediateDirectory)/RedisStore.cpp$(PreprocessSuffix): RedisStore.cpp
+	$(CXX) $(CXXFLAGS) $(IncludePCH) $(IncludePath) $(PreprocessOnlySwitch) $(OutputSwitch) $(IntermediateDirectory)/RedisStore.cpp$(PreprocessSuffix) RedisStore.cpp
 
 
 -include $(IntermediateDirectory)/*$(DependSuffix)
